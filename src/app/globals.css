@@ -1,0 +1,651 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari and Opera */
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* 바비톡과 완전히 동일한 글로벌 폰트 설정 */
+:not(svg, path, rect, g) {
+  font-family: Pretendard Variable, Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, Helvetica Neue, Segoe UI, Apple SD Gothic Neo, Noto Sans KR, Malgun Gothic, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, sans-serif;
+  word-break: keep-all;
+  color: #313142;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Pretendard Variable, Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', sans-serif;
+  background-color: #ffffff;
+}
+
+/* Tailwind CSS 지시문 */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 바비톡 색상 시스템 */
+:root {
+  /* 배경 색상 */
+  --background-common_1: #ffffff;
+  --background-common_2: #f8f9fa;
+  --background-common_3: #484760;
+  --background-plasticSurgery_1: #f3f1ff;
+  --background-plasticSurgery_2: #604aff;
+
+  /* 컨테이너 색상 */
+  --container-common_2: #f5f5f7;
+  --container-common_3: #484760;
+  --container-common_5: #000000;
+  --container-plasticSurgery_1: #f3f1ff;
+  --container-plasticSurgery_2: #604aff;
+  --container-plasticSurgery_3: #604aff;
+  --container-skinTreatment_2: #ff528d;
+
+  /* 라벨 색상 */
+  --label-common_1: #ffffff;
+  --label-common_3: #8e8e93;
+  --label-common_4: #8e8e93;
+  --label-common_5: #313142;
+  --label-common_6: #313142;
+  --label-plasticSurgery_2: #604aff;
+  --label-skinTreatment_2: #ff528d;
+
+  /* 아웃라인 색상 */
+  --outline-common_2: #ececef;
+  --outline-thumbnail: #e5e5ea;
+
+  /* 구분선 색상 */
+  --divider-common_1: #f2f2f7;
+
+  /* 아이콘 색상 */
+  --icon-common_4: #48484a;
+}
+
+/* 바비톡 커스텀 클래스들 */
+.bg-background-common_1 {
+  background-color: var(--background-common_1);
+}
+
+.bg-background-common_2 {
+  background-color: var(--background-common_2);
+}
+
+.bg-background-common_3 {
+  background-color: var(--background-common_3);
+}
+
+.bg-container-common_2 {
+  background-color: var(--container-common_2);
+}
+
+.bg-container-common_3 {
+  background-color: var(--container-common_3);
+}
+
+.bg-container-common_5\/70 {
+  background-color: rgba(0, 0, 0, 0.7);
+}
+
+.text-label-common_1 {
+  color: var(--label-common_1);
+}
+
+.text-label-common_3 {
+  color: var(--label-common_3);
+}
+
+.text-label-common_4 {
+  color: var(--label-common_4);
+}
+
+.text-label-common_5 {
+  --tw-text-opacity: 1;
+  color: rgb(49 49 66 / var(--tw-text-opacity));
+}
+
+.text-label-common_6 {
+  --tw-text-opacity: 1;
+  color: rgb(72 71 96 / var(--tw-text-opacity));
+}
+
+.text-label-plasticSurgery_2 {
+  color: var(--label-plasticSurgery_2);
+}
+
+.text-label-skinTreatment_2 {
+  color: var(--label-skinTreatment_2);
+}
+
+.border-outline-common_2 {
+  border-color: var(--outline-common_2);
+}
+
+.bg-divider-common_3 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(163 163 175 / var(--tw-bg-opacity));
+}
+
+.border-outline-thumbnail {
+  border-color: var(--outline-thumbnail);
+}
+
+/* 스크롤바 숨기기 */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* 바비톡 스타일 커스텀 */
+.swiper-pagination-fraction {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  width: auto;
+  top: auto;
+  left: auto;
+}
+
+/* 모바일 배너 스타일 */
+#mobileBanner {
+  background-color: #604aff;
+}
+
+/* 라인 클램프 스타일 */
+.line-clamp-1 {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+.line-clamp-2 {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* 반응형 디자인 */
+@media (min-width: 768px) {
+  .tablet\:w-\[76px\] {
+    width: 76px;
+  }
+  
+  .tablet\:h-\[36px\] {
+    height: 36px;
+  }
+  
+  .tablet\:px-\[24px\] {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  
+  .tablet\:gap-\[16px\] {
+    gap: 16px;
+  }
+
+  .tablet\:gap-x-\[12px\] {
+    column-gap: 12px;
+  }
+
+  .tablet\:gap-y-\[24px\] {
+    row-gap: 24px;
+  }
+
+  .tablet\:grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tablet\:grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tablet\:w-full {
+    width: 100%;
+  }
+
+  .tablet\:h-auto {
+    height: auto;
+  }
+
+  .tablet\:gap-\[6px\] {
+    gap: 6px;
+  }
+
+  .tablet\:mx-\[-24px\] {
+    margin-left: -24px;
+    margin-right: -24px;
+  }
+
+  .tablet\:mb-\[32px\] {
+    margin-bottom: 32px;
+  }
+
+  .tablet\:pt-0 {
+    padding-top: 0;
+  }
+
+  .tablet\:pb-\[24px\] {
+    padding-bottom: 24px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .desktop\:px-\[32px\] {
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+  
+  .desktop\:py-\[32px\] {
+    padding-top: 32px;
+    padding-bottom: 32px;
+  }
+  
+  .desktop\:gap-\[40px\] {
+    gap: 40px;
+  }
+  
+  .desktop\:h-\[calc\(100dvh-72px\)\] {
+    height: calc(100dvh - 72px);
+  }
+  
+  .desktop\:rounded-t-\[32px\] {
+    border-top-left-radius: 32px;
+    border-top-right-radius: 32px;
+  }
+
+  .desktop\:grid-cols-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .desktop\:grid-cols-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .desktop\:gap-y-\[16px\] {
+    row-gap: 16px;
+  }
+
+  .desktop\:border {
+    border-width: 1px;
+  }
+
+  .desktop\:border-outline-thumbnail {
+    border-color: var(--outline-thumbnail);
+  }
+
+  .desktop\:bg-background-common_2 {
+    background-color: var(--background-common_2);
+  }
+}
+
+/* 바비톡 브랜드 색상 추가 */
+.text-babitalk-purple {
+  color: #604aff;
+}
+
+.bg-babitalk-purple {
+  background-color: #604aff;
+}
+
+.text-babitalk-pink {
+  color: #ff528d;
+}
+
+.bg-babitalk-pink {
+  background-color: #ff528d;
+}
+
+.text-babitalk-green {
+  color: #83ff8a;
+}
+
+/* 호버 효과 */
+.hover\:cursor-pointer:hover {
+  cursor: pointer;
+}
+
+/* 바비톡 카테고리 이미지 스타일 */
+.category-image {
+  border: 2px solid #ececef;
+  width: 54px;
+  height: 54px;
+  border-radius: 20px;
+  transition: all 0.2s ease;
+}
+
+.category-image:hover {
+  border-color: #604aff;
+  transform: scale(1.05);
+}
+
+/* 바비톡 검색바 스타일 */
+.search-input::placeholder {
+  color: #7e7e8f;
+}
+
+/* 배너 슬라이더 스타일 */
+.banner-slide {
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+/* 인기 검색어 버튼 스타일 */
+.search-keyword-btn {
+  min-width: 42px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background-color: var(--container-common_2);
+  color: var(--label-common_5);
+  border: 1px solid var(--outline-common_2);
+  transition: all 0.2s ease;
+}
+
+.search-keyword-btn:hover {
+  background-color: #604aff;
+  color: white;
+  border-color: #604aff;
+}
+
+/* Material Icons 대체 스타일 */
+.material-symbols-rounded {
+  font-family: 'Material Symbols Rounded';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 별점 아이콘 스타일 */
+.star-icon {
+  color: #ffbc33;
+}
+
+/* 이벤트 카드 스타일 */
+.event-card {
+  transition: all 0.2s ease;
+}
+
+.event-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* 후기 카드 스타일 */
+.review-card {
+  transition: all 0.2s ease;
+}
+
+.review-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* 후기 이미지 전/후 배지 */
+.review-badge {
+  border-radius: 16px 0px 16px 0px;
+  background-color: rgba(0, 0, 0, 0.7);
+}
+
+/* 바비톡 폰트 설정 (원본과 동일) */
+:not(svg, path, rect, g) {
+  font-family: Pretendard Variable, Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, Helvetica Neue, Segoe UI, Apple SD Gothic Neo, Noto Sans KR, Malgun Gothic, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, sans-serif;
+  word-break: keep-all;
+  color: #313142;
+}
+
+body {
+  font-family: Pretendard Variable, Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, Helvetica Neue, Segoe UI, Apple SD Gothic Neo, Noto Sans KR, Malgun Gothic, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: #313142;
+}
+
+/* 하이드레이션 안정성을 위한 스타일 */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+#__next {
+  height: 100%;
+}
+
+/* 커스텀 간격 스타일 */
+.gap-y-\[28px\] {
+  row-gap: 28px;
+}
+
+.gap-\[8px\] {
+  gap: 8px;
+}
+
+.gap-\[12px\] {
+  gap: 12px;
+}
+
+.gap-0\.5 {
+  gap: 0.125rem;
+}
+
+.mt-0\.5 {
+  margin-top: 0.125rem;
+}
+
+/* 후기 섹션 특별 스타일 */
+.review-image {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* GetItTok 로고 현대적 애니메이션 */
+@keyframes logoGlow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(236, 72, 153, 0.4);
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.1);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.logo-container {
+  animation: slideIn 0.6s ease-out;
+}
+
+.logo-icon:hover {
+  animation: logoGlow 2s ease-in-out infinite;
+}
+
+.logo-pulse {
+  animation: pulseGlow 1.5s ease-in-out infinite;
+}
+
+/* 글라스모피즘 효과 */
+.glass-effect {
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* 프리미엄 그라데이션 텍스트 */
+.gradient-text-premium {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* 모던한 버튼 호버 효과 */
+.modern-button {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: center;
+}
+
+.modern-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(139, 92, 246, 0.3);
+}
+
+/* 로고 텍스트 개별 애니메이션 */
+.logo-text-get {
+  animation: slideIn 0.6s ease-out 0.1s both;
+}
+
+.logo-text-it {
+  animation: slideIn 0.6s ease-out 0.2s both;
+}
+
+.logo-text-tok {
+  animation: slideIn 0.6s ease-out 0.3s both;
+}
+
+.logo-subtitle {
+  animation: slideIn 0.6s ease-out 0.4s both;
+}
+
+/* 점 애니메이션 개선 */
+.dot-animation-1 {
+  animation: pulseGlow 1.5s ease-in-out infinite;
+}
+
+.dot-animation-2 {
+  animation: pulseGlow 1.5s ease-in-out infinite 0.2s;
+}
+
+.dot-animation-3 {
+  animation: pulseGlow 1.5s ease-in-out infinite 0.4s;
+}
+
+/* 호버시 전체 로고 효과 */
+.logo-container:hover .logo-icon {
+  transform: scale(1.05);
+}
+
+.logo-container:hover .logo-text {
+  transform: translateX(2px);
+}
+
+/* 반응형 로고 조정 */
+@media (max-width: 768px) {
+  .logo-container {
+    gap: 0.5rem;
+  }
+  
+  .logo-text {
+    font-size: 1.25rem;
+  }
+  
+  .logo-subtitle {
+    font-size: 8px;
+  }
+}
+
+/* 병원 이벤트 페이지 전용 CSS */
+.bg-background-plasticSurgery_1 {
+  background-color: var(--background-plasticSurgery_1);
+}
+
+.bg-background-plasticSurgery_2 {
+  background-color: var(--background-plasticSurgery_2);
+}
+
+.bg-container-plasticSurgery_1 {
+  background-color: var(--container-plasticSurgery_1);
+}
+
+.bg-container-plasticSurgery_3 {
+  background-color: var(--container-plasticSurgery_3);
+}
+
+.text-label-plasticSurgery_2 {
+  color: var(--label-plasticSurgery_2);
+}
+
+.text-icon-common_4 {
+  color: var(--icon-common_4);
+}
+
+.border-divider-common_1 {
+  border-color: var(--divider-common_1);
+}
+
+.border-b-divider-common_1 {
+  border-bottom-color: var(--divider-common_1);
+}
+
+/* 정렬 드롭다운 전용 스타일 */
+.bg-background-common_2 {
+  background-color: var(--background-common_2);
+}
+
+.text-label-common_5 {
+  color: var(--label-common_5);
+}
+
+.text-label-common_4 {
+  color: var(--label-common_4);
+}
+
+.border-outline-common_2 {
+  border-color: var(--outline-common_2);
+}

@@ -1,0 +1,55 @@
+/* Pretendard 폰트 - 로컬 파일 사용 (100% 안정적) */
+
+/* Pretendard Variable 폰트 */
+@font-face {
+    font-family: 'Pretendard Variable';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 45 920;
+    src: url('/fonts/pretendard/PretendardVariable.woff2') format('woff2-variations');
+}
+
+/* Pretendard Regular 폰트 */
+@font-face {
+    font-family: 'Pretendard';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url('/fonts/pretendard/Pretendard-Regular.woff2') format('woff2');
+}
+
+/* 기존 Pretendard 폰트 패밀리 설정 (바비톡 원본과 동일) */
+.font-pretendard {
+    font-family: 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', sans-serif;
+}
+
+/* Material Symbols 폰트 */
+@font-face {
+    font-family: 'Material Symbols Rounded';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 700;
+    src: url('/fonts/material-symbols-rounded.6cc71af8.woff2') format('woff2'),
+         url('/fonts/material-symbols-rounded.6d918d39.woff2') format('woff2');
+}
+
+.material-symbols-rounded {
+    font-family: 'Material Symbols Rounded';
+    font-weight: normal;
+    font-style: normal;
+    font-size: 24px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+}
+
+/* 전체 기본 폰트 설정 (바비톡 스타일) */
+body {
+    font-family: 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
