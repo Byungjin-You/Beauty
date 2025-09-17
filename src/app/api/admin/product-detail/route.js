@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import connectDB from '../../../../../lib/mongodb';
+import connectDB from '../../../../lib/mongodb';
 import Ranking from '../../../../../models/Ranking';
 
 // 제품 상세 정보 업데이트
