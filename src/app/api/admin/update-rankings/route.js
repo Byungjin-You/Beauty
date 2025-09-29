@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import connectDB from '../../../../lib/mongodb';
+import connectDB from '../../../../../lib/mongodb';
 import Ranking from '../../../../../models/Ranking';
-import { crawlHwahaeRealData } from '../../../../../src/lib/hybrid-crawler';
+import { crawlHwahaeRealData } from '../../../../lib/hybrid-crawler';
 
 // 유효한 화장품 성분 필터링 함수
 function filterValidIngredients(ingredientsList) {

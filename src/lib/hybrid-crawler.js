@@ -3,13 +3,17 @@
 // 설정 상수
 const CONFIG = {
   TIMEOUTS: {
-    PAGE_LOAD: 15000,     // 15초로 복원 (화해 사이트 느림)
+    PAGE_LOAD: 30000,     // 30초로 증가 (스크롤 작업을 위해)
     WAIT_SHORT: 1000,     // 1초로 정상화
     WAIT_MEDIUM: 2000,    // 2초 유지
     WAIT_LONG: 3000,      // 3초 유지
     STABILIZATION: 2000,  // 2초 유지
     SECTION_LOADING: 5000, // 5초 유지
-    HUMAN_SIMULATION: 1500 // 1.5초 유지
+    HUMAN_SIMULATION: 1500, // 1.5초 유지
+    ELEMENT_WAIT: 10000,  // 요소 대기 시간 추가
+    SHORT: 500,           // 짧은 대기
+    MEDIUM: 1000,         // 중간 대기
+    LONG: 2000           // 긴 대기
   },
   URLS: {
     ENGLISH_BASE: 'https://www.hwahae.com/en/rankings',
@@ -352,7 +356,7 @@ export async function crawlHwahaeRealData(category = 'trending', themeId = '5102
       defaultViewport: null,
       ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=AutomationControlled'],
       ignoreHTTPSErrors: true,
-      slowMo: 1500 // 더 천천히 동작
+      slowMo: 500 // 적당한 속도로 조정
     });
 
     // 병렬로 두 사이트 크롤링
@@ -378,9 +382,10 @@ export async function crawlHwahaeRealData(category = 'trending', themeId = '5102
       };
     });
     
-    // 처음 10개 제품에서 한국 사이트 상세 데이터 크롤링 (detailUrl 사용)
-    console.log('📄 상세 페이지 크롤링 대상 제품 수:', Math.min(10, premergedData.length));
-    const detailData = await crawlKoreanDetailPages(browser, premergedData.slice(0, 10));
+    // 테스트용으로 처음 3개 제품만 상세 데이터 크롤링 (detailUrl 사용)
+    const detailCrawlCount = 3; // 테스트용으로 3개만
+    console.log('📄 상세 페이지 크롤링 대상 제품 수:', Math.min(detailCrawlCount, premergedData.length));
+    const detailData = await crawlKoreanDetailPages(browser, premergedData.slice(0, detailCrawlCount));
     
     // 4단계: 최종 데이터 병합 (영어/한국 사이트 분업)
     console.log('🔗 4단계: 영어/한국 사이트 분업 데이터 병합...');
@@ -433,15 +438,116 @@ async function crawlEnglishSite(browser, themeId) {
   await page.setUserAgent(CONFIG.USER_AGENT);
 
   const englishUrl = `${CONFIG.URLS.ENGLISH_BASE}?theme_id=${themeId}`;
-  await page.goto(englishUrl, { waitUntil: 'domcontentloaded', timeout: CONFIG.TIMEOUTS.PAGE_LOAD });
+  console.log('🌐 영어 사이트 접속:', englishUrl);
+  await page.goto(englishUrl, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUTS.PAGE_LOAD });
 
-  await new Promise(resolve => setTimeout(resolve, CONFIG.TIMEOUTS.LONG));
+  // 초기 로딩 대기
+  await new Promise(resolve => setTimeout(resolve, 3000));
 
-  // 스크롤하여 아이템 로드
-  for (let i = 0; i < 4; i++) {
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await new Promise(resolve => setTimeout(resolve, CONFIG.TIMEOUTS.MEDIUM));
+  // 스크롤하여 50개 아이템 모두 로드 (무한 스크롤 대응)
+  console.log('📜 영어 사이트 스크롤 시작...');
+
+  let previousItemCount = 0;
+  let scrollAttempts = 0;
+  const maxScrollAttempts = 15; // 최대 15번 시도
+  let noNewItemsCount = 0;
+
+  while (scrollAttempts < maxScrollAttempts) {
+    // 현재 아이템 개수 확인
+    const currentItemCount = await page.evaluate(() => {
+      const items = document.querySelectorAll('ul.overflow-auto li, div[class*="grid"] > div[class*="col"], div[class*="product"], article[class*="product"]');
+      return items.length;
+    });
+
+    console.log(`📜 스크롤 시도 ${scrollAttempts + 1}: ${currentItemCount}개 아이템 로드됨`);
+
+    // 50개 이상 로드되면 종료
+    if (currentItemCount >= 50) {
+      console.log('✅ 50개 이상 아이템 로드 완료!');
+      break;
+    }
+
+    // 새로운 아이템이 로드되지 않았으면 카운트 증가
+    if (currentItemCount === previousItemCount) {
+      noNewItemsCount++;
+      console.log(`⚠️ 새 아이템 없음 (${noNewItemsCount}/3)`);
+
+      // 3번 연속으로 새 아이템이 없으면 더 강력한 스크롤 시도
+      if (noNewItemsCount >= 3) {
+        console.log('🔄 강화된 스크롤 시도...');
+
+        // 페이지 중간으로 스크롤
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight / 2);
+        });
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // 맨 아래로 스크롤
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight);
+        });
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // 스크롤 이벤트 강제 발생
+        await page.evaluate(() => {
+          window.dispatchEvent(new Event('scroll'));
+          document.dispatchEvent(new Event('scroll'));
+        });
+
+        noNewItemsCount = 0; // 리셋
+      }
+    } else {
+      noNewItemsCount = 0;
+    }
+
+    previousItemCount = currentItemCount;
+
+    // 다양한 스크롤 방법 시도
+    const scrollMethods = [
+      // 방법 1: smooth 스크롤
+      async () => {
+        await page.evaluate(() => {
+          window.scrollTo({
+            top: document.body.scrollHeight,
+            behavior: 'smooth'
+          });
+        });
+      },
+      // 방법 2: 단계별 스크롤
+      async () => {
+        await page.evaluate(() => {
+          const scrollStep = window.innerHeight;
+          const currentScroll = window.pageYOffset;
+          window.scrollTo(0, currentScroll + scrollStep);
+        });
+      },
+      // 방법 3: 직접 스크롤
+      async () => {
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight);
+        });
+      }
+    ];
+
+    // 랜덤하게 스크롤 방법 선택
+    const scrollMethod = scrollMethods[scrollAttempts % scrollMethods.length];
+    await scrollMethod();
+
+    // 로딩 대기 (점진적으로 증가)
+    const waitTime = Math.min(2000 + (scrollAttempts * 200), 4000);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+
+    scrollAttempts++;
   }
+
+  // 마지막으로 전체 페이지 확인
+  const finalItemCount = await page.evaluate(() => {
+    return document.querySelectorAll('ul.overflow-auto li, div[class*="grid"] > div[class*="col"], div[class*="product"], article[class*="product"]').length;
+  });
+  console.log(`📊 최종 로드된 아이템 수: ${finalItemCount}개`);
+
+  // 마지막 대기
+  await new Promise(resolve => setTimeout(resolve, CONFIG.TIMEOUTS.LONG));
 
   const englishData = await page.evaluate(() => {
     const items = [];
@@ -522,15 +628,147 @@ async function crawlKoreanSite(browser, themeId) {
   await page.setUserAgent(CONFIG.USER_AGENT);
 
   const koreanUrl = `${CONFIG.URLS.KOREAN_BASE}?english_name=trending&theme_id=${themeId}`;
+  console.log('🌐 한국 사이트 접속:', koreanUrl);
   await page.goto(koreanUrl, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUTS.PAGE_LOAD });
 
-  await new Promise(resolve => setTimeout(resolve, CONFIG.TIMEOUTS.STABILIZATION));
+  // 초기 로딩 대기
+  await new Promise(resolve => setTimeout(resolve, 3000));
 
-  // 스크롤 최적화
-  for (let i = 0; i < 3; i++) {
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await new Promise(resolve => setTimeout(resolve, CONFIG.TIMEOUTS.SHORT));
+  // 스크롤하여 50개 아이템 모두 로드 (무한 스크롤 대응)
+  console.log('📜 한국 사이트 스크롤 시작...');
+
+  let previousItemCount = 0;
+  let scrollAttempts = 0;
+  const maxScrollAttempts = 15; // 최대 15번 시도
+  let noNewItemsCount = 0;
+
+  while (scrollAttempts < maxScrollAttempts) {
+    // 현재 아이템 개수 확인 (랭킹 아이템 선택자 개선)
+    const currentItemCount = await page.evaluate(() => {
+      // 다양한 선택자 시도
+      const selectors = [
+        'li[class*="rank"]',
+        'li[class*="item"]',
+        'div[class*="rank"]',
+        'article[class*="product"]',
+        'div[class*="product-item"]',
+        'li' // 기본 li 태그
+      ];
+
+      let maxCount = 0;
+      for (const selector of selectors) {
+        const count = document.querySelectorAll(selector).length;
+        if (count > maxCount) maxCount = count;
+      }
+      return maxCount;
+    });
+
+    console.log(`📜 한국 사이트 스크롤 시도 ${scrollAttempts + 1}: ${currentItemCount}개 아이템 로드됨`);
+
+    // 50개 이상 로드되면 종료
+    if (currentItemCount >= 50) {
+      console.log('✅ 50개 이상 아이템 로드 완료!');
+      break;
+    }
+
+    // 새로운 아이템이 로드되지 않았으면 카운트 증가
+    if (currentItemCount === previousItemCount) {
+      noNewItemsCount++;
+      console.log(`⚠️ 새 아이템 없음 (${noNewItemsCount}/3)`);
+
+      // 3번 연속으로 새 아이템이 없으면 더 강력한 스크롤 시도
+      if (noNewItemsCount >= 3) {
+        console.log('🔄 강화된 스크롤 시도...');
+
+        // 페이지 중간으로 스크롤
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight / 2);
+        });
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // 맨 아래로 스크롤
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight);
+        });
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // 스크롤 이벤트 강제 발생
+        await page.evaluate(() => {
+          window.dispatchEvent(new Event('scroll'));
+          document.dispatchEvent(new Event('scroll'));
+          // IntersectionObserver 트리거를 위한 추가 이벤트
+          window.dispatchEvent(new Event('resize'));
+        });
+
+        noNewItemsCount = 0; // 리셋
+      }
+    } else {
+      noNewItemsCount = 0;
+    }
+
+    previousItemCount = currentItemCount;
+
+    // 다양한 스크롤 방법 시도
+    const scrollMethods = [
+      // 방법 1: smooth 스크롤
+      async () => {
+        await page.evaluate(() => {
+          window.scrollTo({
+            top: document.body.scrollHeight,
+            behavior: 'smooth'
+          });
+        });
+      },
+      // 방법 2: 단계별 스크롤
+      async () => {
+        await page.evaluate(() => {
+          const scrollStep = window.innerHeight;
+          const currentScroll = window.pageYOffset;
+          window.scrollTo(0, currentScroll + scrollStep);
+        });
+      },
+      // 방법 3: 직접 스크롤
+      async () => {
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight);
+        });
+      },
+      // 방법 4: scrollIntoView 사용
+      async () => {
+        await page.evaluate(() => {
+          const items = document.querySelectorAll('li');
+          if (items.length > 0) {
+            items[items.length - 1].scrollIntoView({ behavior: 'smooth', block: 'end' });
+          }
+        });
+      }
+    ];
+
+    // 순차적으로 스크롤 방법 선택
+    const scrollMethod = scrollMethods[scrollAttempts % scrollMethods.length];
+    await scrollMethod();
+
+    // 로딩 대기 (점진적으로 증가)
+    const waitTime = Math.min(2000 + (scrollAttempts * 200), 4000);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+
+    scrollAttempts++;
   }
+
+  // 마지막으로 전체 페이지 확인
+  const finalItemCount = await page.evaluate(() => {
+    const selectors = ['li[class*="rank"]', 'li[class*="item"]', 'li'];
+    let maxCount = 0;
+    for (const selector of selectors) {
+      const count = document.querySelectorAll(selector).length;
+      if (count > maxCount) maxCount = count;
+    }
+    return maxCount;
+  });
+  console.log(`📊 한국 사이트 최종 로드된 아이템 수: ${finalItemCount}개`);
+
+  // 마지막 대기
+  await new Promise(resolve => setTimeout(resolve, CONFIG.TIMEOUTS.STABILIZATION));
 
   const koreanData = await page.evaluate(() => {
     const results = [];

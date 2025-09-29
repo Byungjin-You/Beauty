@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { crawlHwahaeRealData } from '../../../../lib/hybrid-crawler.js';
+import { crawlHwahaeRealData } from '../../../lib/hybrid-crawler';
 
 // 크롤링 테스트 API
 export async function POST(request) {
