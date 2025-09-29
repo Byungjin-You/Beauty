@@ -1748,101 +1748,112 @@ async function crawlSingleProductDetail(browser, product, index, total) {
           // console.log('❌ 카테고리 랭킹 추출 오류:', e.message);
         }
 
-        // 범용적 수상 정보 추출 (HTML 패턴 기반)
+        // 수상 정보 추출 - HTML 구조 기반
         result.awards = [];
         try {
-          // console.log('🏆 범용 수상 정보 추출 시작...');
+          console.log('🏆 수상 정보 추출 시작...');
 
-          // 페이지에서 수상 정보 패턴을 광범위하게 찾기
-          const pageText = document.body.textContent || document.documentElement.textContent || '';
-          // console.log(`📝 페이지 전체 텍스트 길이: ${pageText.length}`);
+          // "수상" 텍스트를 포함하는 요소 찾기
+          const allElements = document.querySelectorAll('span, div');
+          let awardLabelElement = null;
 
-          // 다양한 어워드 패턴들
-          const awardPatterns = [
-            // 1. 기존 패턴: 2023 하반기 트렌드 어워드 - 수분 부문
-            /(20\d{2}\s*(?:상반기|하반기)?\s*트렌드\s*어워드\s*[-–]\s*[가-힣]+\s*부문).*?([가-힣\/]+\s*\d+위)/g,
-
-            // 2. 연간 어워드 패턴: 2023년 올해의 제품
-            /(20\d{2}년?\s*올해의?\s*[가-힣]+).*?([가-힣\/]+\s*\d+위)/g,
-
-            // 3. 카테고리별 어워드: 에센스 부문 1위
-            /([가-힣\/]+\s*부문\s*\d+위)/g,
-
-            // 4. 베스트 제품 패턴: 베스트 수분 제품
-            /(베스트\s*[가-힣]+\s*제품).*?(\d+위)/g,
-
-            // 5. 어워드가 포함된 일반 패턴
-            /([가-힣]*어워드[가-힣]*)\s*[-–]\s*([가-힣\/]+.*?\d+위)/g
-          ];
-
-          let foundAwards = 0;
-
-          for (const pattern of awardPatterns) {
-            let match;
-            while ((match = pattern.exec(pageText)) !== null && foundAwards < 5) {
-              const rawTitle = match[1]?.trim();
-              const rawDescription = match[2]?.trim();
-
-              if (rawTitle && rawDescription && rawTitle.length > 2 && rawDescription.length > 2) {
-                // 텍스트 정리
-                let title = rawTitle.replace(/\s+/g, ' ').trim();
-                let description = rawDescription.replace(/\s+/g, ' ').trim();
-
-                // 중복 체크
-                const isDuplicate = result.awards.some(award =>
-                  award.title === title || award.description === description
-                );
-
-                if (!isDuplicate) {
-                  result.awards.push({
-                    title: title,
-                    description: description
-                  });
-                  foundAwards++;
-                  // console.log(`✅ 수상 정보 추출: "${title}" - "${description}"`);
-                }
-              }
-
-              // 무한 루프 방지
-              if (pattern.lastIndex === match.index) {
-                break;
-              }
+          for (const elem of allElements) {
+            if (elem.textContent?.trim() === '수상') {
+              awardLabelElement = elem;
+              console.log('✅ 수상 라벨 요소 발견');
+              break;
             }
           }
 
-          // 추가 검색: 단순히 "위" 패턴이 있는 경우
-          if (result.awards.length === 0 && pageText.includes('위')) {
-            const simpleRankingPatterns = [
-              /([가-힣\/]+)\s*(\d+위)/g,
-              /(랭킹\s*\d+위)/g,
-              /(순위\s*\d+위)/g
-            ];
+          if (awardLabelElement) {
+            // 수상 라벨의 부모 요소에서 수상 정보 찾기
+            const parentContainer = awardLabelElement.closest('div.flex');
 
-            for (const pattern of simpleRankingPatterns) {
-              let match;
-              while ((match = pattern.exec(pageText)) !== null && result.awards.length < 3) {
-                const category = match[1]?.trim() || '카테고리';
-                const ranking = match[2]?.trim();
+            if (parentContainer) {
+              // button 또는 div에서 수상 정보 텍스트 찾기
+              const awardButton = parentContainer.querySelector('button');
+              const awardContent = awardButton || parentContainer;
 
-                if (ranking && ranking.includes('위')) {
+              // 수상 정보가 있는 div들 찾기
+              const awardTextElements = awardContent.querySelectorAll('span');
+
+              if (awardTextElements.length >= 2) {
+                // 첫 번째 span: 2025 상반기 효능/효과 - 스킨케어 부문 - 수분
+                // 두 번째 span: 스킨/토너 패드 1위
+                const mainAward = awardTextElements[0]?.textContent?.trim() || '';
+                const subAward = awardTextElements[1]?.textContent?.trim() || '';
+
+                if (mainAward && subAward) {
+                  // 전체 수상 정보 조합
+                  const fullAwardText = `${mainAward} ${subAward}`;
+
                   result.awards.push({
-                    title: `${category} 랭킹`,
-                    description: ranking
+                    title: mainAward,
+                    description: subAward
                   });
-                  // console.log(`✅ 간단 랭킹 정보: "${category}" - "${ranking}"`);
-                }
 
-                if (pattern.lastIndex === match.index) {
-                  break;
+                  console.log(`✅ 수상 정보 추출 성공: "${mainAward}" - "${subAward}"`);
+                }
+              } else if (awardTextElements.length === 1) {
+                // span이 하나만 있는 경우
+                const awardText = awardTextElements[0]?.textContent?.trim() || '';
+
+                if (awardText) {
+                  // - 로 구분해서 파싱
+                  if (awardText.includes(' - ')) {
+                    const parts = awardText.split(' - ');
+                    result.awards.push({
+                      title: parts[0].trim(),
+                      description: parts.slice(1).join(' - ').trim()
+                    });
+                  } else {
+                    result.awards.push({
+                      title: '수상',
+                      description: awardText
+                    });
+                  }
+
+                  console.log(`✅ 수상 정보 추출: "${awardText}"`);
                 }
               }
             }
           }
 
-          // console.log(`🏆 범용 추출 결과: ${result.awards.length}개`);
+          // 수상 정보를 못 찾은 경우 대체 방법으로 시도
+          if (result.awards.length === 0) {
+            console.log('⚠️ 수상 라벨을 통한 추출 실패, 패턴 매칭으로 시도...');
+
+            // 전체 텍스트에서 수상 패턴 찾기
+            const allText = document.body.textContent || '';
+
+            // 2025 상반기 효능/효과 - 스킨케어 부문 - 수분 스킨/토너 패드 1위 패턴
+            const awardPattern = /(20\d{2}\s*상반기.*?(?:효능|효과).*?[-–]\s*.*?부문.*?[-–]\s*.*?\d+위)/;
+            const match = allText.match(awardPattern);
+
+            if (match) {
+              const fullAward = match[0].trim();
+              const parts = fullAward.split(/\s+(?=\S+\s*\d+위)/); // 마지막 "XXX 1위" 부분 분리
+
+              if (parts.length >= 2) {
+                result.awards.push({
+                  title: parts[0].trim(),
+                  description: parts[1].trim()
+                });
+              } else {
+                result.awards.push({
+                  title: '수상',
+                  description: fullAward
+                });
+              }
+
+              console.log(`✅ 패턴 매칭으로 수상 정보 추출: "${fullAward}"`);
+            }
+          }
+
+          console.log(`🏆 수상 정보 추출 완료: ${result.awards.length}개`);
 
         } catch (e) {
-          console.log('❌ 범용 수상 정보 추출 오류:', e.message);
+          console.log('❌ 수상 정보 추출 오류:', e.message);
         }
 
         // AI 분석 데이터 추출 - 완전히 새로운 
