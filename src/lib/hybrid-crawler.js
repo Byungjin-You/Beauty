@@ -1,5 +1,28 @@
 // 최적화된 하이브리드 크롤링: 영어 사이트(가격/용량) + 한국어 사이트(이미지/변동정보)
 
+const puppeteer = require('puppeteer');
+
+// ===========================================
+// 로깅 시스템 설정 (Phase 1 개선)
+// ===========================================
+const LOG_LEVELS = {
+  ERROR: 0,
+  WARN: 1,
+  INFO: 2,
+  DEBUG: 3
+};
+
+const CURRENT_LOG_LEVEL = process.env.NODE_ENV === 'production'
+  ? LOG_LEVELS.ERROR
+  : LOG_LEVELS.INFO;
+
+const logger = {
+  error: (...args) => CURRENT_LOG_LEVEL >= LOG_LEVELS.ERROR && logger.error('[ERROR]', ...args),
+  warn: (...args) => CURRENT_LOG_LEVEL >= LOG_LEVELS.WARN && console.warn('[WARN]', ...args),
+  info: (...args) => CURRENT_LOG_LEVEL >= LOG_LEVELS.INFO && logger.info('[INFO]', ...args),
+  debug: (...args) => CURRENT_LOG_LEVEL >= LOG_LEVELS.DEBUG && logger.info('[DEBUG]', ...args)
+};
+
 // 설정 상수
 const CONFIG = {
   TIMEOUTS: {
@@ -38,6 +61,78 @@ const CONFIG = {
   ]
 };
 
+// ===========================================
+// 통합 대기 함수 시스템 (Phase 1 개선 + Phase 3 동적 대기)
+// ===========================================
+async function wait(ms, reason = '') {
+  if (reason) logger.debug(`대기 중: ${reason} (${ms}ms)`);
+  await new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function smartWait(ms, condition = null) {
+  if (condition) {
+    try {
+      await Promise.race([
+        condition,
+        new Promise(resolve => setTimeout(resolve, ms))
+      ]);
+    } catch (error) {
+      await wait(ms, 'condition failed');
+    }
+  } else {
+    await wait(ms);
+  }
+}
+
+// Phase 3: 동적 대기 함수 - 콘텐츠 로드 감지
+async function waitForContentReady(page, options = {}) {
+  const {
+    selector = null,
+    checkInterval = 100,
+    maxWait = 3000,
+    minContent = 1
+  } = options;
+
+  const startTime = Date.now();
+  let lastContentSize = 0;
+  let stableCount = 0;
+  const requiredStableChecks = 3;
+
+  while (Date.now() - startTime < maxWait) {
+    try {
+      // 콘텐츠 크기 확인
+      const contentSize = await page.evaluate((sel) => {
+        if (sel) {
+          const elements = document.querySelectorAll(sel);
+          return elements.length;
+        }
+        return document.body.innerHTML.length;
+      }, selector);
+
+      // 콘텐츠가 안정화되었는지 확인
+      if (contentSize >= minContent && contentSize === lastContentSize) {
+        stableCount++;
+        if (stableCount >= requiredStableChecks) {
+          logger.debug(`콘텐츠 안정화 확인 (${Date.now() - startTime}ms)`);
+          return true;
+        }
+      } else {
+        stableCount = 0;
+      }
+
+      lastContentSize = contentSize;
+      await wait(checkInterval);
+
+    } catch (error) {
+      logger.debug('콘텐츠 확인 중 오류:', error.message);
+      break;
+    }
+  }
+
+  logger.debug(`최대 대기 시간 도달 (${maxWait}ms)`);
+  return false;
+}
+
 // 스마트 대기 함수들 (조건부 대기로 성능 향상)
 async function waitForSectionToLoad(page, sectionText, maxTimeout = CONFIG.TIMEOUTS.SECTION_LOADING) {
   try {
@@ -54,24 +149,127 @@ async function waitForSectionToLoad(page, sectionText, maxTimeout = CONFIG.TIMEO
     );
     return true;
   } catch (error) {
-    console.log(`⚠️ 섹션 로딩 타임아웃 (${sectionText}), 기본 대기 시간 사용`);
+    logger.debug(`섹션 로딩 타임아웃 (${sectionText}), 기본 대기 시간 사용`);
     return false;
   }
 }
 
-async function smartWait(ms, condition = null) {
-  if (condition) {
-    try {
-      await Promise.race([
-        condition,
-        new Promise(resolve => setTimeout(resolve, ms))
-      ]);
-    } catch (error) {
-      await new Promise(resolve => setTimeout(resolve, ms));
+// ===========================================
+// 통합 스크롤 함수 (Phase 2 개선)
+// ===========================================
+async function performSmartScroll(page, targetItemCount = 50, itemSelector = null) {
+  logger.info(`📜 스마트 스크롤 시작 (목표: ${targetItemCount}개)`);
+
+  // 기본 셀렉터 설정
+  const selector = itemSelector || 'ul.overflow-auto li, div[class*="grid"] > div[class*="col"], div[class*="product"], article[class*="product"]';
+
+  let previousItemCount = 0;
+  let scrollAttempts = 0;
+  const maxScrollAttempts = 15;
+  let noNewItemsCount = 0;
+
+  // 스크롤 메서드 정의
+  const scrollMethods = [
+    // smooth 스크롤
+    async () => {
+      await page.evaluate(() => {
+        window.scrollTo({
+          top: document.body.scrollHeight,
+          behavior: 'smooth'
+        });
+      });
+    },
+    // 단계별 스크롤
+    async () => {
+      await page.evaluate(() => {
+        const scrollStep = window.innerHeight;
+        const currentScroll = window.pageYOffset;
+        window.scrollTo(0, currentScroll + scrollStep);
+      });
+    },
+    // 직접 스크롤
+    async () => {
+      await page.evaluate(() => {
+        window.scrollTo(0, document.body.scrollHeight);
+      });
     }
-  } else {
-    await new Promise(resolve => setTimeout(resolve, ms));
+  ];
+
+  while (scrollAttempts < maxScrollAttempts) {
+    // 현재 아이템 개수 확인
+    const currentItemCount = await page.evaluate((sel) => {
+      const items = document.querySelectorAll(sel);
+      return items.length;
+    }, selector);
+
+    logger.debug(`스크롤 ${scrollAttempts + 1}: ${currentItemCount}개 로드됨`);
+
+    // 목표 달성 시 종료
+    if (currentItemCount >= targetItemCount) {
+      logger.info(`✅ 목표 달성: ${currentItemCount}개 아이템 로드`);
+      return currentItemCount;
+    }
+
+    // 진행 상황 체크
+    if (currentItemCount === previousItemCount) {
+      noNewItemsCount++;
+
+      if (noNewItemsCount >= 3) {
+        // 강화된 스크롤 시도
+        logger.debug('강화된 스크롤 시도');
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight / 2);
+        });
+        await wait(500);
+        await page.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight);
+        });
+        await wait(1000);
+        noNewItemsCount = 0;
+      }
+    } else {
+      noNewItemsCount = 0;
+    }
+
+    previousItemCount = currentItemCount;
+
+    // 스크롤 실행
+    const scrollMethod = scrollMethods[scrollAttempts % scrollMethods.length];
+    await scrollMethod();
+
+    // 점진적 대기
+    const waitTime = Math.min(1000 + (scrollAttempts * 100), 2000);
+    await wait(waitTime, 'scroll loading');
+
+    scrollAttempts++;
   }
+
+  return previousItemCount;
+}
+
+// ===========================================
+// 브라우저 및 페이지 설정 최적화 (Phase 1 개선)
+// ===========================================
+async function createOptimizedBrowser(headless = true) {
+  const browser = await puppeteer.launch({
+    headless: headless,
+    args: CONFIG.BROWSER_ARGS
+  });
+  return browser;
+}
+
+async function createOptimizedPage(browser, blockResources = true) {
+  const page = await browser.newPage();
+
+  // User Agent 설정
+  await setupBotBypass(page);
+
+  // 리소스 차단 설정 (옵션)
+  if (blockResources) {
+    await setupResourceBlocking(page);
+  }
+
+  return page;
 }
 
 // 리소스 차단으로 성능 향상
@@ -199,7 +397,7 @@ async function visitMainPageFirst(page) {
 
     return true;
   } catch (error) {
-    console.log('⚠️ 메인 페이지 방문 실패:', error.message);
+    logger.warn('메인 페이지 방문 실패:', error.message);
     return false;
   }
 }
@@ -297,7 +495,7 @@ async function simulateHumanBehavior(page) {
     await smartWait(1500 + Math.random() * 2500);
 
   } catch (error) {
-    console.log('⚠️ 인간 행동 시뮬레이션 중 오류:', error.message);
+    logger.info('⚠️ 인간 행동 시뮬레이션 중 오류:', error.message);
     // 오류가 발생해도 기본 대기는 수행
     await smartWait(2000);
   }
@@ -325,7 +523,7 @@ export async function crawlHwahaeRealData(category = 'trending', themeId = '5102
   try {
     const puppeteer = await import('puppeteer');
     
-    console.log(`🔄 하이브리드 크롤링 시작: themeId=${themeId}`);
+    logger.info(`🔄 하이브리드 크롤링 시작: themeId=${themeId}`);
 
     const browser = await puppeteer.default.launch({
       headless: false,
@@ -360,18 +558,18 @@ export async function crawlHwahaeRealData(category = 'trending', themeId = '5102
     });
 
     // 병렬로 두 사이트 크롤링
-    console.log('🚀 영어/한국어 사이트 병렬 크롤링 시작...');
+    logger.info('🚀 영어/한국어 사이트 병렬 크롤링 시작...');
     const [englishData, koreanData] = await Promise.all([
       crawlEnglishSite(browser, themeId),
       crawlKoreanSite(browser, themeId)
     ]);
     
     // 3단계: 상세 페이지 정보 수집 (실제 크롤링)
-    console.log('📄 3단계: 실제 상세 페이지 크롤링 시작...');
-    console.log(`📄 크롤링할 제품 수: ${englishData.length}개`);
+    logger.info('📄 3단계: 실제 상세 페이지 크롤링 시작...');
+    logger.info(`📄 크롤링할 제품 수: ${englishData.length}개`);
     
     // 3.5단계: 영어 데이터와 한국 데이터 사전 병합 (detailUrl 포함)
-    console.log('🔗 3.5단계: 기본 데이터 병합...');
+    logger.info('🔗 3.5단계: 기본 데이터 병합...');
     const premergedData = englishData.map((item, index) => {
       const koreanItem = koreanData[index] || {};
       return {
@@ -384,11 +582,11 @@ export async function crawlHwahaeRealData(category = 'trending', themeId = '5102
     
     // 테스트용으로 처음 3개 제품만 상세 데이터 크롤링 (detailUrl 사용)
     const detailCrawlCount = 3; // 테스트용으로 3개만
-    console.log('📄 상세 페이지 크롤링 대상 제품 수:', Math.min(detailCrawlCount, premergedData.length));
+    logger.info('📄 상세 페이지 크롤링 대상 제품 수:', Math.min(detailCrawlCount, premergedData.length));
     const detailData = await crawlKoreanDetailPages(browser, premergedData.slice(0, detailCrawlCount));
     
     // 4단계: 최종 데이터 병합 (영어/한국 사이트 분업)
-    console.log('🔗 4단계: 영어/한국 사이트 분업 데이터 병합...');
+    logger.info('🔗 4단계: 영어/한국 사이트 분업 데이터 병합...');
     const mergedData = premergedData.map((item, index) => {
       const detail = detailData[index] || {};
       return {
@@ -420,12 +618,12 @@ export async function crawlHwahaeRealData(category = 'trending', themeId = '5102
 
     await browser.close();
 
-    console.log(`✅ 하이브리드 크롤링 완료: ${mergedData.length}개 아이템`);
-    console.log(`📊 첫 번째 아이템 상세 정보:`, JSON.stringify(mergedData[0], null, 2));
+    logger.info(`✅ 하이브리드 크롤링 완료: ${mergedData.length}개 아이템`);
+    logger.info(`📊 첫 번째 아이템 상세 정보:`, JSON.stringify(mergedData[0], null, 2));
     return mergedData;
 
   } catch (error) {
-    console.error('❌ 하이브리드 크롤링 오류:', error);
+    logger.error('❌ 하이브리드 크롤링 오류:', error);
     throw error;
   }
 }
@@ -438,113 +636,24 @@ async function crawlEnglishSite(browser, themeId) {
   await page.setUserAgent(CONFIG.USER_AGENT);
 
   const englishUrl = `${CONFIG.URLS.ENGLISH_BASE}?theme_id=${themeId}`;
-  console.log('🌐 영어 사이트 접속:', englishUrl);
+  logger.info('🌐 영어 사이트 접속:', englishUrl);
   await page.goto(englishUrl, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUTS.PAGE_LOAD });
 
-  // 초기 로딩 대기
-  await new Promise(resolve => setTimeout(resolve, 3000));
+  // Phase 3 개선: 동적 대기로 변경
+  await waitForContentReady(page, {
+    selector: 'ul.overflow-auto li, div[class*="grid"] > div[class*="col"], div[class*="product"]',
+    maxWait: 3000,
+    minContent: 5
+  });
 
-  // 스크롤하여 50개 아이템 모두 로드 (무한 스크롤 대응)
-  console.log('📜 영어 사이트 스크롤 시작...');
-
-  let previousItemCount = 0;
-  let scrollAttempts = 0;
-  const maxScrollAttempts = 15; // 최대 15번 시도
-  let noNewItemsCount = 0;
-
-  while (scrollAttempts < maxScrollAttempts) {
-    // 현재 아이템 개수 확인
-    const currentItemCount = await page.evaluate(() => {
-      const items = document.querySelectorAll('ul.overflow-auto li, div[class*="grid"] > div[class*="col"], div[class*="product"], article[class*="product"]');
-      return items.length;
-    });
-
-    console.log(`📜 스크롤 시도 ${scrollAttempts + 1}: ${currentItemCount}개 아이템 로드됨`);
-
-    // 50개 이상 로드되면 종료
-    if (currentItemCount >= 50) {
-      console.log('✅ 50개 이상 아이템 로드 완료!');
-      break;
-    }
-
-    // 새로운 아이템이 로드되지 않았으면 카운트 증가
-    if (currentItemCount === previousItemCount) {
-      noNewItemsCount++;
-      console.log(`⚠️ 새 아이템 없음 (${noNewItemsCount}/3)`);
-
-      // 3번 연속으로 새 아이템이 없으면 더 강력한 스크롤 시도
-      if (noNewItemsCount >= 3) {
-        console.log('🔄 강화된 스크롤 시도...');
-
-        // 페이지 중간으로 스크롤
-        await page.evaluate(() => {
-          window.scrollTo(0, document.body.scrollHeight / 2);
-        });
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // 맨 아래로 스크롤
-        await page.evaluate(() => {
-          window.scrollTo(0, document.body.scrollHeight);
-        });
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // 스크롤 이벤트 강제 발생
-        await page.evaluate(() => {
-          window.dispatchEvent(new Event('scroll'));
-          document.dispatchEvent(new Event('scroll'));
-        });
-
-        noNewItemsCount = 0; // 리셋
-      }
-    } else {
-      noNewItemsCount = 0;
-    }
-
-    previousItemCount = currentItemCount;
-
-    // 다양한 스크롤 방법 시도
-    const scrollMethods = [
-      // 방법 1: smooth 스크롤
-      async () => {
-        await page.evaluate(() => {
-          window.scrollTo({
-            top: document.body.scrollHeight,
-            behavior: 'smooth'
-          });
-        });
-      },
-      // 방법 2: 단계별 스크롤
-      async () => {
-        await page.evaluate(() => {
-          const scrollStep = window.innerHeight;
-          const currentScroll = window.pageYOffset;
-          window.scrollTo(0, currentScroll + scrollStep);
-        });
-      },
-      // 방법 3: 직접 스크롤
-      async () => {
-        await page.evaluate(() => {
-          window.scrollTo(0, document.body.scrollHeight);
-        });
-      }
-    ];
-
-    // 랜덤하게 스크롤 방법 선택
-    const scrollMethod = scrollMethods[scrollAttempts % scrollMethods.length];
-    await scrollMethod();
-
-    // 로딩 대기 (점진적으로 증가)
-    const waitTime = Math.min(2000 + (scrollAttempts * 200), 4000);
-    await new Promise(resolve => setTimeout(resolve, waitTime));
-
-    scrollAttempts++;
-  }
+  // 통합 스크롤 함수 사용 (Phase 2 개선)
+  await performSmartScroll(page, 50);
 
   // 마지막으로 전체 페이지 확인
   const finalItemCount = await page.evaluate(() => {
     return document.querySelectorAll('ul.overflow-auto li, div[class*="grid"] > div[class*="col"], div[class*="product"], article[class*="product"]').length;
   });
-  console.log(`📊 최종 로드된 아이템 수: ${finalItemCount}개`);
+  logger.info(`📊 최종 로드된 아이템 수: ${finalItemCount}개`);
 
   // 마지막 대기
   await new Promise(resolve => setTimeout(resolve, CONFIG.TIMEOUTS.LONG));
@@ -610,7 +719,7 @@ async function crawlEnglishSite(browser, themeId) {
         }
         
       } catch (error) {
-        // console.error(`❌ 영어 사이트 아이템 ${index + 1} 파싱 오류:`, error);
+        // logger.error(`❌ 영어 사이트 아이템 ${index + 1} 파싱 오류:`, error);
       }
     });
 
@@ -628,132 +737,19 @@ async function crawlKoreanSite(browser, themeId) {
   await page.setUserAgent(CONFIG.USER_AGENT);
 
   const koreanUrl = `${CONFIG.URLS.KOREAN_BASE}?english_name=trending&theme_id=${themeId}`;
-  console.log('🌐 한국 사이트 접속:', koreanUrl);
+  logger.info('🌐 한국 사이트 접속:', koreanUrl);
   await page.goto(koreanUrl, { waitUntil: 'networkidle2', timeout: CONFIG.TIMEOUTS.PAGE_LOAD });
 
-  // 초기 로딩 대기
-  await new Promise(resolve => setTimeout(resolve, 3000));
+  // Phase 3 개선: 동적 대기로 변경
+  await waitForContentReady(page, {
+    selector: 'ul.overflow-auto li, div[class*="grid"] > div[class*="col"], div[class*="product"]',
+    maxWait: 3000,
+    minContent: 5
+  });
 
-  // 스크롤하여 50개 아이템 모두 로드 (무한 스크롤 대응)
-  console.log('📜 한국 사이트 스크롤 시작...');
-
-  let previousItemCount = 0;
-  let scrollAttempts = 0;
-  const maxScrollAttempts = 15; // 최대 15번 시도
-  let noNewItemsCount = 0;
-
-  while (scrollAttempts < maxScrollAttempts) {
-    // 현재 아이템 개수 확인 (랭킹 아이템 선택자 개선)
-    const currentItemCount = await page.evaluate(() => {
-      // 다양한 선택자 시도
-      const selectors = [
-        'li[class*="rank"]',
-        'li[class*="item"]',
-        'div[class*="rank"]',
-        'article[class*="product"]',
-        'div[class*="product-item"]',
-        'li' // 기본 li 태그
-      ];
-
-      let maxCount = 0;
-      for (const selector of selectors) {
-        const count = document.querySelectorAll(selector).length;
-        if (count > maxCount) maxCount = count;
-      }
-      return maxCount;
-    });
-
-    console.log(`📜 한국 사이트 스크롤 시도 ${scrollAttempts + 1}: ${currentItemCount}개 아이템 로드됨`);
-
-    // 50개 이상 로드되면 종료
-    if (currentItemCount >= 50) {
-      console.log('✅ 50개 이상 아이템 로드 완료!');
-      break;
-    }
-
-    // 새로운 아이템이 로드되지 않았으면 카운트 증가
-    if (currentItemCount === previousItemCount) {
-      noNewItemsCount++;
-      console.log(`⚠️ 새 아이템 없음 (${noNewItemsCount}/3)`);
-
-      // 3번 연속으로 새 아이템이 없으면 더 강력한 스크롤 시도
-      if (noNewItemsCount >= 3) {
-        console.log('🔄 강화된 스크롤 시도...');
-
-        // 페이지 중간으로 스크롤
-        await page.evaluate(() => {
-          window.scrollTo(0, document.body.scrollHeight / 2);
-        });
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // 맨 아래로 스크롤
-        await page.evaluate(() => {
-          window.scrollTo(0, document.body.scrollHeight);
-        });
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // 스크롤 이벤트 강제 발생
-        await page.evaluate(() => {
-          window.dispatchEvent(new Event('scroll'));
-          document.dispatchEvent(new Event('scroll'));
-          // IntersectionObserver 트리거를 위한 추가 이벤트
-          window.dispatchEvent(new Event('resize'));
-        });
-
-        noNewItemsCount = 0; // 리셋
-      }
-    } else {
-      noNewItemsCount = 0;
-    }
-
-    previousItemCount = currentItemCount;
-
-    // 다양한 스크롤 방법 시도
-    const scrollMethods = [
-      // 방법 1: smooth 스크롤
-      async () => {
-        await page.evaluate(() => {
-          window.scrollTo({
-            top: document.body.scrollHeight,
-            behavior: 'smooth'
-          });
-        });
-      },
-      // 방법 2: 단계별 스크롤
-      async () => {
-        await page.evaluate(() => {
-          const scrollStep = window.innerHeight;
-          const currentScroll = window.pageYOffset;
-          window.scrollTo(0, currentScroll + scrollStep);
-        });
-      },
-      // 방법 3: 직접 스크롤
-      async () => {
-        await page.evaluate(() => {
-          window.scrollTo(0, document.body.scrollHeight);
-        });
-      },
-      // 방법 4: scrollIntoView 사용
-      async () => {
-        await page.evaluate(() => {
-          const items = document.querySelectorAll('li');
-          if (items.length > 0) {
-            items[items.length - 1].scrollIntoView({ behavior: 'smooth', block: 'end' });
-          }
-        });
-      }
-    ];
-
-    // 순차적으로 스크롤 방법 선택
-    const scrollMethod = scrollMethods[scrollAttempts % scrollMethods.length];
-    await scrollMethod();
-
-    // 로딩 대기 (점진적으로 증가)
-    const waitTime = Math.min(2000 + (scrollAttempts * 200), 4000);
-    await new Promise(resolve => setTimeout(resolve, waitTime));
-
-    scrollAttempts++;
-  }
+  // 통합 스크롤 함수 사용 (Phase 2 개선)
+  const koreanItemSelector = 'li[class*="rank"], li[class*="item"], div[class*="rank"], article[class*="product"], div[class*="product-item"], li';
+  await performSmartScroll(page, 50, koreanItemSelector);
 
   // 마지막으로 전체 페이지 확인
   const finalItemCount = await page.evaluate(() => {
@@ -765,7 +761,7 @@ async function crawlKoreanSite(browser, themeId) {
     }
     return maxCount;
   });
-  console.log(`📊 한국 사이트 최종 로드된 아이템 수: ${finalItemCount}개`);
+  logger.info(`📊 한국 사이트 최종 로드된 아이템 수: ${finalItemCount}개`);
 
   // 마지막 대기
   await new Promise(resolve => setTimeout(resolve, CONFIG.TIMEOUTS.STABILIZATION));
@@ -844,18 +840,18 @@ async function crawlKoreanSite(browser, themeId) {
         if (image || rankChange || detailUrl) {
           results[index] = { image, rankChange, detailUrl };
           if (image && brand && name) {
-            // console.log(`✓ ${index + 1}위: ${brand} - ${name.substring(0, 20)}... (URL: ${detailUrl ? '✅' : '❌'})`);
+            // logger.info(`✓ ${index + 1}위: ${brand} - ${name.substring(0, 20)}... (URL: ${detailUrl ? '✅' : '❌'})`);
           }
         }
         
       } catch (error) {
-        // console.error(`한국어 사이트 아이템 ${index} 처리 중 오류:`, error);
+        // logger.error(`한국어 사이트 아이템 ${index} 처리 중 오류:`, error);
       }
     });
 
     const imageCount = results.filter(item => item?.image).length;
     const changeCount = results.filter(item => item?.rankChange).length;
-    // console.log(`한국어 사이트에서 이미지 ${imageCount}개, 변동정보 ${changeCount}개 추출`);
+    // logger.info(`한국어 사이트에서 이미지 ${imageCount}개, 변동정보 ${changeCount}개 추출`);
 
     return results;
   });
@@ -864,10 +860,240 @@ async function crawlKoreanSite(browser, themeId) {
   return koreanData;
 }
 
+// ===========================================
+// 병렬 처리 시스템 (Phase 3 개선)
+// ===========================================
+
+async function crawlInBatches(browser, products, crawlFunction, batchSize = CONFIG.LIMITS.CONCURRENT_PAGES || 3) {
+  logger.info(`🚀 병렬 크롤링 시작: ${products.length}개 제품을 ${batchSize}개씩 처리`);
+
+  const results = [];
+  const totalProducts = products.length;
+
+  for (let i = 0; i < products.length; i += batchSize) {
+    const batch = products.slice(i, Math.min(i + batchSize, products.length));
+    const batchNum = Math.floor(i / batchSize) + 1;
+    const totalBatches = Math.ceil(products.length / batchSize);
+
+    logger.info(`📦 배치 ${batchNum}/${totalBatches} 처리 중 (${batch.length}개 제품)`);
+
+    try {
+      // 배치 내 제품들을 병렬로 처리
+      const batchPromises = batch.map(async (product, batchIndex) => {
+        const globalIndex = i + batchIndex;
+        try {
+          const result = await crawlFunction(browser, product, globalIndex, totalProducts);
+          return { success: true, data: result, index: globalIndex };
+        } catch (error) {
+          logger.error(`제품 크롤링 실패 (${product.name}):`, error.message);
+          return { success: false, data: product, index: globalIndex, error: error.message };
+        }
+      });
+
+      // 배치 결과 수집
+      const batchResults = await Promise.allSettled(batchPromises);
+
+      // 결과 처리 및 재시도
+      for (const result of batchResults) {
+        if (result.status === 'fulfilled' && result.value.success) {
+          results.push(result.value.data);
+        } else if (result.status === 'fulfilled' && !result.value.success) {
+          // 실패한 항목 재시도 (1회)
+          logger.warn(`재시도: ${result.value.data.name}`);
+          try {
+            const retryResult = await crawlFunction(browser, result.value.data, result.value.index, totalProducts);
+            results.push(retryResult);
+          } catch (retryError) {
+            logger.error(`재시도 실패: ${result.value.data.name}`);
+            results.push(result.value.data); // 기본 데이터라도 포함
+          }
+        } else {
+          // Promise rejected
+          logger.error('배치 처리 중 예외 발생');
+          results.push(batch[results.length % batchSize]); // 기본 데이터 포함
+        }
+      }
+
+      // 서버 부하 방지를 위한 배치 간 대기
+      if (i + batchSize < products.length) {
+        await wait(1000, '다음 배치 대기');
+      }
+
+    } catch (batchError) {
+      logger.error(`배치 ${batchNum} 처리 오류:`, batchError.message);
+      // 배치 실패 시 순차 처리로 폴백
+      for (const product of batch) {
+        try {
+          const result = await crawlFunction(browser, product, i + batch.indexOf(product), totalProducts);
+          results.push(result);
+        } catch (error) {
+          results.push(product);
+        }
+      }
+    }
+  }
+
+  logger.info(`✅ 병렬 크롤링 완료: ${results.length}/${products.length}개 성공`);
+  return results;
+}
+
+// ===========================================
+// 상세 페이지 크롤링 헬퍼 함수들 (Phase 2 개선)
+// ===========================================
+
+// 성분 정보 추출 헬퍼
+async function extractIngredientInfo(page) {
+  try {
+    await waitForSectionToLoad(page, '성분');
+    await wait(1000, '성분 섹션 로딩');
+
+    return await page.evaluate(() => {
+      const result = {
+        total: 0,
+        lowRisk: 0,
+        mediumRisk: 0,
+        highRisk: 0,
+        undetermined: 0,
+        fullIngredientsList: []
+      };
+
+      // 성분 통계 추출
+      const statsContainer = document.querySelector('[class*="ingredient"], [class*="성분"]');
+      if (statsContainer) {
+        const numbers = statsContainer.textContent.match(/\d+/g);
+        if (numbers && numbers.length >= 4) {
+          result.total = parseInt(numbers[0]) || 0;
+          result.lowRisk = parseInt(numbers[1]) || 0;
+          result.mediumRisk = parseInt(numbers[2]) || 0;
+          result.highRisk = parseInt(numbers[3]) || 0;
+        }
+      }
+
+      // 성분 리스트 추출
+      const ingredientItems = document.querySelectorAll('[class*="ingredient-item"], [class*="성분-항목"]');
+      result.fullIngredientsList = Array.from(ingredientItems).map(item => ({
+        name: item.querySelector('[class*="name"]')?.textContent?.trim() || item.textContent?.trim(),
+        risk: item.querySelector('[class*="risk"]')?.textContent?.trim() || ''
+      })).filter(i => i.name);
+
+      return result;
+    });
+  } catch (error) {
+    logger.debug('성분 정보 추출 실패:', error.message);
+    return null;
+  }
+}
+
+// AI 분석 추출 헬퍼
+async function extractAIAnalysisInfo(page) {
+  try {
+    return await page.evaluate(() => {
+      const result = { pros: [], cons: [], summary: '' };
+
+      // 장점 추출
+      const prosSection = Array.from(document.querySelectorAll('section, div'))
+        .find(el => el.textContent?.includes('장점') || el.textContent?.includes('Pros'));
+      if (prosSection) {
+        const items = prosSection.querySelectorAll('li, p');
+        result.pros = Array.from(items)
+          .map(item => item.textContent?.trim())
+          .filter(text => text && text.length > 5 && !text.includes('장점'));
+      }
+
+      // 단점 추출
+      const consSection = Array.from(document.querySelectorAll('section, div'))
+        .find(el => el.textContent?.includes('단점') || el.textContent?.includes('Cons'));
+      if (consSection) {
+        const items = consSection.querySelectorAll('li, p');
+        result.cons = Array.from(items)
+          .map(item => item.textContent?.trim())
+          .filter(text => text && text.length > 5 && !text.includes('단점'));
+      }
+
+      return result;
+    });
+  } catch (error) {
+    logger.debug('AI 분석 추출 실패:', error.message);
+    return { pros: [], cons: [], summary: '' };
+  }
+}
+
+// 피부 타입 분석 추출 헬퍼
+async function extractSkinTypeInfo(page) {
+  try {
+    return await page.evaluate(() => {
+      const result = {
+        oily: 0,
+        dry: 0,
+        sensitive: 0,
+        combination: 0,
+        normal: 0
+      };
+
+      // 피부 타입 점수 추출
+      const typeMapping = {
+        '지성': 'oily',
+        '건성': 'dry',
+        '민감': 'sensitive',
+        '복합': 'combination',
+        '중성': 'normal'
+      };
+
+      Object.entries(typeMapping).forEach(([korean, english]) => {
+        const elem = Array.from(document.querySelectorAll('*'))
+          .find(el => el.textContent?.includes(korean) && el.textContent?.match(/\d+/));
+        if (elem) {
+          const match = elem.textContent.match(/(\d+)/);
+          if (match) result[english] = parseInt(match[1]);
+        }
+      });
+
+      return result;
+    });
+  } catch (error) {
+    logger.debug('피부 타입 분석 추출 실패:', error.message);
+    return null;
+  }
+}
+
+// 수상 정보 추출 헬퍼
+async function extractAwardsInfo(page) {
+  try {
+    return await page.evaluate(() => {
+      const awards = [];
+
+      // "수상" 라벨을 찾아서 처리
+      const awardLabel = Array.from(document.querySelectorAll('span, div'))
+        .find(el => el.textContent?.trim() === '수상');
+
+      if (awardLabel) {
+        const container = awardLabel.closest('div.flex, div[class*="flex"]');
+        if (container) {
+          const textElements = container.querySelectorAll('span, div');
+          textElements.forEach((elem, idx) => {
+            const text = elem.textContent?.trim();
+            if (text && text !== '수상' && text.length > 5) {
+              awards.push({
+                title: text,
+                description: ''
+              });
+            }
+          });
+        }
+      }
+
+      return awards;
+    });
+  } catch (error) {
+    logger.debug('수상 정보 추출 실패:', error.message);
+    return [];
+  }
+}
+
 // 한국 사이트에서 상세 AI 분석 데이터 크롤링
 // 개별 상품 상세 페이지 크롤링 (강화된 에러 핸들링)
 async function crawlSingleProductDetail(browser, product, index, total) {
-  console.log(`📄 한국 사이트 크롤링 중: ${index + 1}/${total} - ${product.name}`);
+  logger.info(`📄 한국 사이트 크롤링 중: ${index + 1}/${total} - ${product.name}`);
 
   // 재시도 로직 추가 (Execution context destroyed 오류 대응)
   let attempts = 0;
@@ -875,7 +1101,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
 
   while (attempts <= maxRetries) {
     if (attempts > 0) {
-      console.log(`🔄 재시도 중 (${attempts}/${maxRetries}): ${product.name}`);
+      logger.info(`🔄 재시도 중 (${attempts}/${maxRetries}): ${product.name}`);
       // 재시도 전 랜덤 대기 (봇 감지 회피)
       await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 3000));
     }
@@ -888,22 +1114,22 @@ async function crawlSingleProductDetail(browser, product, index, total) {
       // 페이지 생성 후 즉시 준비 상태 확인
       try {
         await page.evaluate(() => document.readyState);
-        console.log(`✅ 페이지 생성 성공: ${product.name}`);
+        logger.info(`✅ 페이지 생성 성공: ${product.name}`);
       } catch (contextError) {
         throw new Error(`페이지 생성 직후 컨텍스트 오류: ${contextError.message}`);
       }
 
       // 페이지 에러 이벤트 핸들링
       page.on('error', (error) => {
-        console.log(`⚠️ 페이지 에러 (${product.name}):`, error.message);
+        logger.info(`⚠️ 페이지 에러 (${product.name}):`, error.message);
       });
 
       page.on('pageerror', (error) => {
-        console.log(`⚠️ 페이지 스크립트 에러 (${product.name}):`, error.message);
+        logger.info(`⚠️ 페이지 스크립트 에러 (${product.name}):`, error.message);
       });
 
       page.on('disconnect', () => {
-        console.log(`⚠️ 페이지 연결 끊김 (${product.name})`);
+        logger.info(`⚠️ 페이지 연결 끊김 (${product.name})`);
       });
 
       await setupResourceBlocking(page);
@@ -916,7 +1142,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
         });
 
         if (!isReady) {
-          console.log(`⚠️ 페이지 준비 상태 확인 실패: ${product.name}`);
+          logger.info(`⚠️ 페이지 준비 상태 확인 실패: ${product.name}`);
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
       } catch (readyError) {
@@ -928,20 +1154,20 @@ async function crawlSingleProductDetail(browser, product, index, total) {
       if (!detailUrl && product.productId) {
         // detailUrl이 없으면 productId로 생성
         detailUrl = `https://www.hwahae.co.kr/products/${product.productId}`;
-        console.log(`🔧 detailUrl 생성: ${detailUrl}`);
+        logger.info(`🔧 detailUrl 생성: ${detailUrl}`);
       }
 
       if (!detailUrl) {
-        console.log('❌ 한국 사이트 상세 URL이 없음 (productId도 없음)');
+        logger.info('❌ 한국 사이트 상세 URL이 없음 (productId도 없음)');
         throw new Error('상세 URL 없음');
       }
       
-      console.log(`📄 한국 사이트 상세 페이지: ${detailUrl}`);
+      logger.info(`📄 한국 사이트 상세 페이지: ${detailUrl}`);
       
       // 직접 상세 페이지 접근 (메인 페이지 방문 제거)
       try {
         // 직접 상세 페이지로 이동 (가장 효과적인 방법)
-        console.log(`📄 상세 페이지 직접 접근: ${detailUrl}`);
+        logger.info(`📄 상세 페이지 직접 접근: ${detailUrl}`);
         await page.goto(detailUrl, {
           waitUntil: 'domcontentloaded',
           timeout: CONFIG.TIMEOUTS.PAGE_LOAD
@@ -957,16 +1183,16 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             new Promise(resolve => setTimeout(resolve, CONFIG.TIMEOUTS.STABILIZATION))
           ]);
         } catch (e) {
-          console.log('📍 섹션 로딩 타임아웃, 계속 진행');
+          logger.info('📍 섹션 로딩 타임아웃, 계속 진행');
         }
 
       } catch (error) {
-        console.error('❌ 페이지 접근 오류:', error.message);
+        logger.error('❌ 페이지 접근 오류:', error.message);
         throw error;
       }
       
       // 섹션별 순차 스크롤링 (동적 로딩 대응)
-      // console.log('📜 섹션별 순차 스크롤링...');
+      // logger.info('📜 섹션별 순차 스크롤링...');
       
       // 1. 맨 위로 이동
       await page.evaluate(() => {
@@ -975,7 +1201,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       
       // 2. AI 분석 섹션으로 스크롤
-      // console.log('🤖 AI 분석 섹션으로 스크롤...');
+      // logger.info('🤖 AI 분석 섹션으로 스크롤...');
       await page.evaluate(() => {
         const aiSection = Array.from(document.querySelectorAll('section')).find(section =>
           section.textContent.includes('AI가 분석한 리뷰')
@@ -987,7 +1213,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
       await new Promise(resolve => setTimeout(resolve, CONFIG.TIMEOUTS.WAIT_MEDIUM));
       
       // 3. 성분 섹션으로 스크롤 + 개선된 추출
-      // console.log('🧪 성분 섹션으로 스크롤 및 개선된 추출...');
+      // logger.info('🧪 성분 섹션으로 스크롤 및 개선된 추출...');
       const ingredientsData = await page.evaluate(async () => {
         // 성분 섹션 찾기 (더 정확한 방법)
         const findIngredientSection = () => {
@@ -1014,13 +1240,13 @@ async function crawlSingleProductDetail(browser, product, index, total) {
         }
 
         if (!ingredientSection) {
-          // console.log('❌ 성분 섹션을 찾을 수 없음');
+          // logger.info('❌ 성분 섹션을 찾을 수 없음');
           return {};
         }
 
         // 섹션으로 스크롤
         ingredientSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        // console.log('✅ 성분 섹션으로 스크롤 완료');
+        // logger.info('✅ 성분 섹션으로 스크롤 완료');
 
         // 동적 컨텐츠 로딩을 위한 추가 대기
         await new Promise(resolve => setTimeout(resolve, 3000));
@@ -1034,24 +1260,24 @@ async function crawlSingleProductDetail(browser, product, index, total) {
 
         try {
           // 1. 동적 버튼 기반 성분 정보 추출 (신규 방식)
-          // console.log('🔘 동적 버튼에서 성분 정보 추출 시작...');
+          // logger.info('🔘 동적 버튼에서 성분 정보 추출 시작...');
 
           // 전체 성분 개수 추출
           const totalIngredientText = ingredientSection.textContent;
           const totalMatch = totalIngredientText.match(/전체\s*성분[^0-9]*?(\d+)/);
           if (totalMatch) {
             result.componentStats.total = parseInt(totalMatch[1]) || 0;
-            // console.log(`✅ 전체 성분: ${result.componentStats.total}개`);
+            // logger.info(`✅ 전체 성분: ${result.componentStats.total}개`);
           }
 
           // 버튼들에서 성분 정보 추출
           const buttons = ingredientSection.querySelectorAll('button[type="button"]');
-          // console.log(`🔍 발견된 성분 관련 버튼: ${buttons.length}개`);
+          // logger.info(`🔍 발견된 성분 관련 버튼: ${buttons.length}개`);
 
           buttons.forEach((button, index) => {
             const buttonText = button.textContent || '';
             const cleanText = buttonText.replace(/\s+/g, ' ').trim();
-            // console.log(`버튼 ${index + 1}: ${cleanText.substring(0, 80)}...`);
+            // logger.info(`버튼 ${index + 1}: ${cleanText.substring(0, 80)}...`);
 
             // 주의성분 추출 (20가지 주의성분 Free/0/숫자 형태 모두 포함)
             if (cleanText.includes('주의성분')) {
@@ -1066,7 +1292,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                   total: totalCaution,
                   present: 0
                 };
-                // console.log(`✅ 주의성분: ${totalCaution}가지 중 Free (0개)`);
+                // logger.info(`✅ 주의성분: ${totalCaution}가지 중 Free (0개)`);
                 cautionProcessed = true;
               }
 
@@ -1081,7 +1307,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                     total: totalCaution,
                     present: presentCount
                   };
-                  // console.log(`✅ 주의성분: ${totalCaution}가지 중 ${presentCount}개 포함`);
+                  // logger.info(`✅ 주의성분: ${totalCaution}가지 중 ${presentCount}개 포함`);
                   cautionProcessed = true;
                 }
               }
@@ -1097,7 +1323,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                     total: 20,
                     present: cautionCount
                   };
-                  // console.log(`✅ 주의성분: ${cautionCount}개 (기본 패턴)`);
+                  // logger.info(`✅ 주의성분: ${cautionCount}개 (기본 패턴)`);
                 }
               }
             }
@@ -1106,12 +1332,12 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             if (cleanText.includes('알레르기 주의성분')) {
               if (cleanText.includes('Free')) {
                 result.componentStats.highRisk = 0;
-                // console.log('✅ 알레르기 주의성분: Free (0개)');
+                // logger.info('✅ 알레르기 주의성분: Free (0개)');
               } else {
                 const allergyMatch = cleanText.match(/알레르기\s*주의성분.*?(\d+)/);
                 if (allergyMatch) {
                   result.componentStats.highRisk = parseInt(allergyMatch[1]) || 0;
-                  // console.log(`✅ 알레르기 주의성분: ${result.componentStats.highRisk}개`);
+                  // logger.info(`✅ 알레르기 주의성분: ${result.componentStats.highRisk}개`);
                 }
               }
             }
@@ -1121,7 +1347,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               const wrinkleMatch = cleanText.match(/주름\s*개선.*?(\d+)/);
               if (wrinkleMatch) {
                 result.purposeBasedIngredients['주름 개선'] = parseInt(wrinkleMatch[1]) || 0;
-                // console.log(`✅ 주름 개선 성분: ${result.purposeBasedIngredients['주름 개선']}개`);
+                // logger.info(`✅ 주름 개선 성분: ${result.purposeBasedIngredients['주름 개선']}개`);
               }
             }
 
@@ -1129,7 +1355,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               const whiteningMatch = cleanText.match(/미백.*?(\d+)/);
               if (whiteningMatch) {
                 result.purposeBasedIngredients['피부 미백'] = parseInt(whiteningMatch[1]) || 0;
-                // console.log(`✅ 피부 미백 성분: ${result.purposeBasedIngredients['피부 미백']}개`);
+                // logger.info(`✅ 피부 미백 성분: ${result.purposeBasedIngredients['피부 미백']}개`);
               }
             }
 
@@ -1138,7 +1364,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               const sunscreenMatch = cleanText.match(/자외선\s*차단.*?(\d+)/);
               if (sunscreenMatch) {
                 result.purposeBasedIngredients['자외선 차단'] = parseInt(sunscreenMatch[1]) || 0;
-                // console.log(`✅ 자외선 차단 성분: ${result.purposeBasedIngredients['자외선 차단']}개`);
+                // logger.info(`✅ 자외선 차단 성분: ${result.purposeBasedIngredients['자외선 차단']}개`);
               }
             }
 
@@ -1146,7 +1372,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               const moistureMatch = cleanText.match(/보습.*?(\d+)/);
               if (moistureMatch) {
                 result.purposeBasedIngredients['피부 보습'] = parseInt(moistureMatch[1]) || 0;
-                // console.log(`✅ 피부 보습 성분: ${result.purposeBasedIngredients['피부 보습']}개`);
+                // logger.info(`✅ 피부 보습 성분: ${result.purposeBasedIngredients['피부 보습']}개`);
               }
             }
           });
@@ -1158,15 +1384,15 @@ async function crawlSingleProductDetail(browser, product, index, total) {
           result.componentStats.lowRisk = Math.max(0, total - medium - high);
           result.componentStats.undetermined = 0; // 기본값
 
-          // console.log('🧮 동적 추출 완료된 성분 통계:', result.componentStats);
-          // console.log('🎯 동적 추출 완료된 목적별 성분:', result.purposeBasedIngredients);
+          // logger.info('🧮 동적 추출 완료된 성분 통계:', result.componentStats);
+          // logger.info('🎯 동적 추출 완료된 목적별 성분:', result.purposeBasedIngredients);
 
           // 2. 실제 존재하는 성분 분석 정보 추출 (화해 사이트 실제 구조 기반)
-          // console.log('📋 실제 성분 분석 정보 추출...');
+          // logger.info('📋 실제 성분 분석 정보 추출...');
 
           // 실제 성분명 리스트 추출 (성분 펼치기 버튼 클릭)
           try {
-            console.log('🧪 성분 리스트 추출 시도...');
+            logger.info('🧪 성분 리스트 추출 시도...');
 
             // 성분 펼치기 버튼 찾기 (여러 패턴 시도)
             const expandButtons = [
@@ -1179,13 +1405,13 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               )
             ];
 
-            console.log(`🔍 성분 펼치기 버튼 후보: ${expandButtons.length}개`);
+            logger.info(`🔍 성분 펼치기 버튼 후보: ${expandButtons.length}개`);
 
             let extractedIngredients = [];
 
             if (expandButtons.length > 0) {
               const expandButton = expandButtons[0];
-              console.log(`🖱️ 성분 펼치기 버튼 클릭: "${expandButton.textContent.trim().substring(0, 50)}"`);
+              logger.info(`🖱️ 성분 펼치기 버튼 클릭: "${expandButton.textContent.trim().substring(0, 50)}"`);
 
               await expandButton.click();
               await page.waitForTimeout(CONFIG.TIMEOUTS.WAIT_MEDIUM);
@@ -1195,7 +1421,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                 '.ingredient-item, .ingredient-name, .text-sm, .hds-text-body-medium, [class*="ingredient"]'
               );
 
-              console.log(`🧪 추출된 성분 요소: ${ingredientElements.length}개`);
+              logger.info(`🧪 추출된 성분 요소: ${ingredientElements.length}개`);
 
               for (const element of ingredientElements) {
                 const text = element.textContent?.trim();
@@ -1226,19 +1452,19 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               .slice(0, 30);
 
             result.fullIngredientsList = uniqueIngredients;
-            console.log(`✅ 성분 추출 완료: ${result.fullIngredientsList.length}개`);
+            logger.info(`✅ 성분 추출 완료: ${result.fullIngredientsList.length}개`);
 
           } catch (ingredientError) {
-            console.log(`⚠️ 성분 추출 실패: ${ingredientError.message}`);
+            logger.info(`⚠️ 성분 추출 실패: ${ingredientError.message}`);
             result.fullIngredientsList = [];
           }
 
           // 성분 구성 정보 직접 추출 (HTML 구조 기반)
-          // console.log('🧮 HTML 구조 기반 성분 구성 정보 추출...');
+          // logger.info('🧮 HTML 구조 기반 성분 구성 정보 추출...');
 
           // 성분 구성 div들 찾기 (.shrink-0 클래스 내부의 정보들)
           const componentDivs = ingredientSection.querySelectorAll('.shrink-0');
-          // console.log(`성분 구성 div 수: ${componentDivs.length}개`);
+          // logger.info(`성분 구성 div 수: ${componentDivs.length}개`);
 
           componentDivs.forEach((div, index) => {
             const text = div.textContent || '';
@@ -1246,7 +1472,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
 
             if (subtitleSpan) {
               const value = subtitleSpan.textContent.trim();
-              // console.log(`성분 구성 ${index + 1}: ${text.substring(0, 30)} = ${value}`);
+              // logger.info(`성분 구성 ${index + 1}: ${text.substring(0, 30)} = ${value}`);
 
               if (text.includes('전체 성분')) {
                 result.componentStats.total = parseInt(value) || 0;
@@ -1262,7 +1488,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             }
           });
 
-          // console.log('📊 HTML 기반 성분 구성 결과:', result.componentStats);
+          // logger.info('📊 HTML 기반 성분 구성 결과:', result.componentStats);
 
           // 전체 성분 개수 추출
           const totalIngredientsElement = ingredientSection.querySelector('h3');
@@ -1270,7 +1496,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             const totalMatch = totalIngredientsElement.textContent.match(/전체 성분.*?(\d+)/);
             if (totalMatch) {
               result.totalIngredientsCount = parseInt(totalMatch[1]);
-              // console.log(`📊 전체 성분 개수: ${result.totalIngredientsCount}개`);
+              // logger.info(`📊 전체 성분 개수: ${result.totalIngredientsCount}개`);
             }
           }
 
@@ -1279,11 +1505,11 @@ async function crawlSingleProductDetail(browser, product, index, total) {
 
           // 모든 버튼에서 성분 분석 정보 추출
           const analysisButtons = ingredientSection.querySelectorAll('button');
-          // console.log(`🔍 성분 분석 버튼 수: ${analysisButtons.length}개`);
+          // logger.info(`🔍 성분 분석 버튼 수: ${analysisButtons.length}개`);
 
           analysisButtons.forEach((button, index) => {
             const buttonText = button.textContent?.trim() || '';
-            // console.log(`🔍 버튼 ${index + 1}: ${buttonText.substring(0, 100)}`);
+            // logger.info(`🔍 버튼 ${index + 1}: ${buttonText.substring(0, 100)}`);
 
             // 주의성분 정보 (개선된 패턴 매칭 - Free 포함)
             if (buttonText.includes('주의성분') && !buttonText.includes('알레르기')) {
@@ -1297,7 +1523,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                   total: totalCaution,
                   present: 0
                 };
-                // console.log(`⚠️ 주의성분: ${totalCaution}가지 중 Free (0개)`);
+                // logger.info(`⚠️ 주의성분: ${totalCaution}가지 중 Free (0개)`);
                 cautionProcessed = true;
               }
 
@@ -1311,7 +1537,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                     total: totalCaution,
                     present: presentCount
                   };
-                  // console.log(`⚠️ 주의성분: ${totalCaution}가지 중 ${presentCount}개`);
+                  // logger.info(`⚠️ 주의성분: ${totalCaution}가지 중 ${presentCount}개`);
                   cautionProcessed = true;
                 }
               }
@@ -1325,7 +1551,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                     total: parseInt(cautionMatch[1]),
                     present: parseInt(countMatch[1])
                   };
-                  // console.log(`⚠️ 주의성분: ${cautionMatch[1]}가지 중 ${countMatch[1]}개`);
+                  // logger.info(`⚠️ 주의성분: ${cautionMatch[1]}가지 중 ${countMatch[1]}개`);
                   cautionProcessed = true;
                 } else if (cautionMatch) {
                   // 단순히 "X가지 주의성분"만 있는 경우
@@ -1334,7 +1560,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                     total: totalCaution,
                     present: 0  // 개수가 명시되지 않으면 0으로 가정
                   };
-                  // console.log(`⚠️ 주의성분: ${totalCaution}가지 (개수 미명시, 0으로 가정)`);
+                  // logger.info(`⚠️ 주의성분: ${totalCaution}가지 (개수 미명시, 0으로 가정)`);
                 }
               }
             }
@@ -1343,12 +1569,12 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             if (buttonText.includes('알레르기 주의성분')) {
               if (buttonText.includes('Free')) {
                 result.ingredientAnalysis.allergyIngredients = 'Free';
-                // console.log('🛡️ 알레르기 주의성분: Free');
+                // logger.info('🛡️ 알레르기 주의성분: Free');
               } else {
                 const allergyMatch = buttonText.match(/(\d+)$/);
                 if (allergyMatch) {
                   result.ingredientAnalysis.allergyIngredients = parseInt(allergyMatch[1]);
-                  // console.log(`🛡️ 알레르기 주의성분: ${allergyMatch[1]}개`);
+                  // logger.info(`🛡️ 알레르기 주의성분: ${allergyMatch[1]}개`);
                 }
               }
             }
@@ -1358,7 +1584,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               const wrinkleMatch = buttonText.match(/(\d+)$/);
               if (wrinkleMatch) {
                 result.ingredientAnalysis.antiAgingIngredients = parseInt(wrinkleMatch[1]);
-                // console.log(`💆 주름 개선 성분: ${wrinkleMatch[1]}개`);
+                // logger.info(`💆 주름 개선 성분: ${wrinkleMatch[1]}개`);
               }
             }
 
@@ -1366,21 +1592,21 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               const brighteningMatch = buttonText.match(/(\d+)$/);
               if (brighteningMatch) {
                 result.ingredientAnalysis.brighteningIngredients = parseInt(brighteningMatch[1]);
-                // console.log(`✨ 미백 성분: ${brighteningMatch[1]}개`);
+                // logger.info(`✨ 미백 성분: ${brighteningMatch[1]}개`);
               }
             }
           });
 
-          console.log('✅ 실제 성분 분석 정보 추출 완료:', {
+          logger.info('✅ 실제 성분 분석 정보 추출 완료:', {
             totalCount: result.totalIngredientsCount,
             analysis: result.ingredientAnalysis
           });
 
           // 3. 목적별 성분 정보 추출 (개선된 방법)
-          console.log('🎯 목적별 성분 정보 추출...');
+          logger.info('🎯 목적별 성분 정보 추출...');
 
           // 목적별 성분 정보 직접 추출 (HTML 구조 기반)
-          console.log('🎯 HTML 구조 기반 목적별 성분 정보 추출...');
+          logger.info('🎯 HTML 구조 기반 목적별 성분 정보 추출...');
 
           // 더 넓은 범위에서 목적별 성분 찾기
           const allPurposeElements = ingredientSection.querySelectorAll('div');
@@ -1404,16 +1630,16 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                 const label = labelElement.textContent.trim();
 
                 purposeItemsData.push({ label, count, countText });
-                console.log(`목적별 성분 발견: ${label} = ${countText}`);
+                logger.info(`목적별 성분 발견: ${label} = ${countText}`);
               }
             }
           });
 
-          console.log(`차트 기반으로 발견된 목적별 성분: ${purposeItemsData.length}개`);
+          logger.info(`차트 기반으로 발견된 목적별 성분: ${purposeItemsData.length}개`);
 
           // 차트 기반으로 찾지 못했다면 다른 방법 시도
           if (purposeItemsData.length < 5) {
-            console.log('🔄 대안 방법으로 목적별 성분 찾기...');
+            logger.info('🔄 대안 방법으로 목적별 성분 찾기...');
 
             // 방법 1: flex flex-col items-center 패턴으로 찾기
             const flexContainers = ingredientSection.querySelectorAll('div.flex.flex-col.items-center');
@@ -1430,7 +1656,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
 
                   if (!purposeItemsData.some(item => item.label === label)) {
                     purposeItemsData.push({ label, count, countText });
-                    console.log(`대안 방법 1으로 발견: ${label} = ${countText}`);
+                    logger.info(`대안 방법 1으로 발견: ${label} = ${countText}`);
                   }
                 }
               }
@@ -1459,7 +1685,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                     const count = parseInt(countText) || 0;
 
                     purposeItemsData.push({ label, count, countText });
-                    console.log(`대안 방법 2로 발견: ${label} = ${countText}`);
+                    logger.info(`대안 방법 2로 발견: ${label} = ${countText}`);
                   }
                 }
               });
@@ -1471,12 +1697,12 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             result.purposeBasedIngredients[item.label] = item.count;
           });
 
-          console.log(`최종 목적별 성분 개수: ${purposeItemsData.length}개`);
+          logger.info(`최종 목적별 성분 개수: ${purposeItemsData.length}개`);
 
-          console.log('목적별 성분 최종 결과:', result.purposeBasedIngredients);
+          logger.info('목적별 성분 최종 결과:', result.purposeBasedIngredients);
 
           // 4. 피부타입별 성분 분석 추출 (기존 로직 유지하되 개선)
-          // console.log('🧴 피부타입별 성분 분석 추출...');
+          // logger.info('🧴 피부타입별 성분 분석 추출...');
 
           result.skinTypeAnalysis = {
             oily: { good: 0, bad: 0 },
@@ -1506,22 +1732,22 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             }
           });
 
-          console.log('✅ 개선된 성분 정보 추출 완료:', result);
-          console.log('🔍 ingredientAnalysis 확인:', result.ingredientAnalysis);
+          logger.info('✅ 개선된 성분 정보 추출 완료:', result);
+          logger.info('🔍 ingredientAnalysis 확인:', result.ingredientAnalysis);
           return result;
 
         } catch (error) {
-          console.log('❌ 성분 정보 추출 중 오류:', error);
+          logger.info('❌ 성분 정보 추출 중 오류:', error);
           return result; // 부분적으로라도 추출된 데이터 반환
         }
       });
       
-      console.log('🧪 성분 정보 즉시 추출 완료:', ingredientsData);
-      console.log('🔍 성분 데이터 상세:', JSON.stringify(ingredientsData, null, 2));
+      logger.info('🧪 성분 정보 즉시 추출 완료:', ingredientsData);
+      logger.info('🔍 성분 데이터 상세:', JSON.stringify(ingredientsData, null, 2));
       await new Promise(resolve => setTimeout(resolve, 2000)); // 추가 대기
       
       // 4. 피부타입별 성분 섹션으로 스크롤
-      console.log('🧴 피부타입별 성분 섹션으로 스크롤...');
+      logger.info('🧴 피부타입별 성분 섹션으로 스크롤...');
       await page.evaluate(() => {
         const skinTypeSection = Array.from(document.querySelectorAll('section')).find(section => 
           section.textContent.includes('피부 타입별 성분')
@@ -1532,19 +1758,19 @@ async function crawlSingleProductDetail(browser, product, index, total) {
       });
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      // console.log('✅ 모든 섹션 순차 스크롤링 완료');
+      // logger.info('✅ 모든 섹션 순차 스크롤링 완료');
       
       // HTML 구조 상세 분석 및 데이터 추출
-      // console.log('🔍 HTML 구조 상세 분석 시작...');
+      // logger.info('🔍 HTML 구조 상세 분석 시작...');
       
       // 간소화된 디버그 정보 수집
       await page.evaluate(() => {
-        console.log('페이지 분석:', document.title, window.location.href);
+        logger.info('페이지 분석:', document.title, window.location.href);
       });
       
-      console.log('✅ 페이지 로딩, 상호작용, 스크롤, API 호출 모두 완료');
+      logger.info('✅ 페이지 로딩, 상호작용, 스크롤, API 호출 모두 완료');
 
-      console.log('🚀 page.evaluate 함수 호출 직전!');
+      logger.info('🚀 page.evaluate 함수 호출 직전!');
 
       // 스크린샷 촬영 (디버깅용 - 환경변수로 제어)
       if (process.env.CRAWLER_DEBUG === 'true') {
@@ -1555,9 +1781,9 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             fullPage: true,
             type: 'png'
           });
-          console.log(`📸 스크린샷 저장: ${screenshotPath}`);
+          logger.info(`📸 스크린샷 저장: ${screenshotPath}`);
         } catch (e) {
-          console.log('스크린샷 저장 실패:', e.message);
+          logger.info('스크린샷 저장 실패:', e.message);
         }
       }
 
@@ -1565,20 +1791,20 @@ async function crawlSingleProductDetail(browser, product, index, total) {
       const detail = await page.evaluate((preExtractedIngredients) => {
         const result = {};
 
-        // console.log('🔥 page.evaluate 함수 시작!');
+        // logger.info('🔥 page.evaluate 함수 시작!');
 
         // 미리 추출된 개선된 성분 데이터 사용
         result.ingredients = preExtractedIngredients || {};
-        console.log('📥 미리 추출된 개선된 성분 데이터:', result.ingredients);
+        logger.info('📥 미리 추출된 개선된 성분 데이터:', result.ingredients);
 
         // 간소화된 페이지 분석
-        // console.log('📊 페이지 분석 시작...');
+        // logger.info('📊 페이지 분석 시작...');
         
         
         // 브랜드 로고 추출 - 개선된 버전
         result.brandLogo = '';
         try {
-          // console.log('🏷️ 브랜드 로고 추출 시작...');
+          // logger.info('🏷️ 브랜드 로고 추출 시작...');
           
           // 여러 셀렉터로 브랜드 로고 찾기
           const brandSelectors = [
@@ -1605,7 +1831,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               }
               
               result.brandLogo = logoUrl;
-              // console.log(`✅ 브랜드 로고 발견 (${selector}): ${logoUrl}`);
+              // logger.info(`✅ 브랜드 로고 발견 (${selector}): ${logoUrl}`);
               break;
             }
           }
@@ -1616,22 +1842,22 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             const brandUrlMatch = pageHTML.match(/https:\/\/[^"']*brands\/[^"']*\.(png|jpg|jpeg|webp)/i);
             if (brandUrlMatch) {
               result.brandLogo = brandUrlMatch[0] + '?size=100x100';
-              // console.log(`✅ 브랜드 로고 HTML에서 발견: ${result.brandLogo}`);
+              // logger.info(`✅ 브랜드 로고 HTML에서 발견: ${result.brandLogo}`);
             }
           }
           
           if (!result.brandLogo) {
-            // console.log('❌ 브랜드 로고를 찾을 수 없음');
+            // logger.info('❌ 브랜드 로고를 찾을 수 없음');
           }
           
         } catch (e) {
-          // console.log('❌ 브랜드 로고 추출 오류:', e.message);
+          // logger.info('❌ 브랜드 로고 추출 오류:', e.message);
         }
         
         // 카테고리 랭킹 추출 - 강화된 가격 정보 제거 방식
         result.categoryRanking = '';
         try {
-          // console.log('🏆 카테고리 랭킹 추출 시작...');
+          // logger.info('🏆 카테고리 랭킹 추출 시작...');
 
           // 방법 1: "랭킹" 라벨을 찾고 인근 버튼에서 깨끗한 랭킹 정보 추출
           const rankingLabelElements = Array.from(document.querySelectorAll('span, div'))
@@ -1647,11 +1873,11 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             const container = labelElement.closest('section, div');
             if (container) {
               const buttons = container.querySelectorAll('button');
-              // console.log(`🔍 랭킹 라벨 근처에서 ${buttons.length}개 버튼 발견`);
+              // logger.info(`🔍 랭킹 라벨 근처에서 ${buttons.length}개 버튼 발견`);
 
               for (const button of buttons) {
                 const buttonText = button.textContent?.trim() || '';
-                // console.log(`버튼 텍스트 검사: "${buttonText}"`);
+                // logger.info(`버튼 텍스트 검사: "${buttonText}"`);
 
                 // 가격 정보 없이 "X위"가 포함된 버튼 찾기
                 if (buttonText.includes('위') &&
@@ -1663,7 +1889,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                     !buttonText.includes('포인트')) {
 
                   result.categoryRanking = buttonText;
-                  // console.log(`✅ HTML 구조에서 깨끗한 랭킹 발견: "${buttonText}"`);
+                  // logger.info(`✅ HTML 구조에서 깨끗한 랭킹 발견: "${buttonText}"`);
                   foundRanking = true;
                   break;
                 }
@@ -1674,17 +1900,17 @@ async function crawlSingleProductDetail(browser, product, index, total) {
 
           // 방법 2: 전체 페이지에서 가격 정보를 제거한 후 패턴 추출
           if (!foundRanking) {
-            // console.log('HTML 구조에서 실패, 텍스트 정제 후 패턴으로 시도...');
+            // logger.info('HTML 구조에서 실패, 텍스트 정제 후 패턴으로 시도...');
 
             let pageText = document.body.textContent;
 
             // 1단계: 가격 관련 텍스트를 사전에 완전 제거
-            // console.log('가격 정보 제거 전 샘플:', pageText.substring(pageText.indexOf('원랭킹'), pageText.indexOf('원랭킹') + 50));
+            // logger.info('가격 정보 제거 전 샘플:', pageText.substring(pageText.indexOf('원랭킹'), pageText.indexOf('원랭킹') + 50));
 
             pageText = pageText.replace(/\d+원랭킹/g, '랭킹'); // "000원랭킹" → "랭킹"으로 변경
             pageText = pageText.replace(/\d+원\s*랭킹/g, '랭킹'); // "000원 랭킹" → "랭킹"으로 변경
 
-            // console.log('가격 정보 제거 후 샘플:', pageText.substring(pageText.indexOf('랭킹'), pageText.indexOf('랭킹') + 50));
+            // logger.info('가격 정보 제거 후 샘플:', pageText.substring(pageText.indexOf('랭킹'), pageText.indexOf('랭킹') + 50));
 
             // 2단계: 깨끗한 랭킹 패턴들로 추출
             const rankingPatterns = [
@@ -1698,7 +1924,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
 
             for (const pattern of rankingPatterns) {
               const matches = [...pageText.matchAll(pattern)];
-              // console.log(`패턴으로 ${matches.length}개 매치 발견`);
+              // logger.info(`패턴으로 ${matches.length}개 매치 발견`);
 
               for (const match of matches) {
                 let rankingText = '';
@@ -1716,7 +1942,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                   rankingText = `${category} ${rank}위`;
                 }
 
-                // console.log(`패턴 매치 후보: "${rankingText}"`);
+                // logger.info(`패턴 매치 후보: "${rankingText}"`);
 
                 // 최종 유효성 검사
                 if (rankingText &&
@@ -1729,7 +1955,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                     rankingText.match(/\d+위$/)) {
 
                   result.categoryRanking = rankingText;
-                  // console.log(`✅ 텍스트 패턴에서 깨끗한 랭킹 발견: "${rankingText}"`);
+                  // logger.info(`✅ 텍스트 패턴에서 깨끗한 랭킹 발견: "${rankingText}"`);
                   foundRanking = true;
                   break;
                 }
@@ -1739,19 +1965,19 @@ async function crawlSingleProductDetail(browser, product, index, total) {
           }
 
           if (!result.categoryRanking) {
-            // console.log('❌ 카테고리 랭킹을 찾을 수 없음');
+            // logger.info('❌ 카테고리 랭킹을 찾을 수 없음');
           } else {
-            // console.log(`🏆 최종 카테고리 랭킹: "${result.categoryRanking}"`);
+            // logger.info(`🏆 최종 카테고리 랭킹: "${result.categoryRanking}"`);
           }
 
         } catch (e) {
-          // console.log('❌ 카테고리 랭킹 추출 오류:', e.message);
+          // logger.info('❌ 카테고리 랭킹 추출 오류:', e.message);
         }
 
         // 수상 정보 추출 - HTML 구조 기반
         result.awards = [];
         try {
-          console.log('🏆 수상 정보 추출 시작...');
+          logger.info('🏆 수상 정보 추출 시작...');
 
           // "수상" 텍스트를 포함하는 요소 찾기
           const allElements = document.querySelectorAll('span, div');
@@ -1760,7 +1986,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
           for (const elem of allElements) {
             if (elem.textContent?.trim() === '수상') {
               awardLabelElement = elem;
-              console.log('✅ 수상 라벨 요소 발견');
+              logger.info('✅ 수상 라벨 요소 발견');
               break;
             }
           }
@@ -1792,7 +2018,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                     description: subAward
                   });
 
-                  console.log(`✅ 수상 정보 추출 성공: "${mainAward}" - "${subAward}"`);
+                  logger.info(`✅ 수상 정보 추출 성공: "${mainAward}" - "${subAward}"`);
                 }
               } else if (awardTextElements.length === 1) {
                 // span이 하나만 있는 경우
@@ -1813,7 +2039,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                     });
                   }
 
-                  console.log(`✅ 수상 정보 추출: "${awardText}"`);
+                  logger.info(`✅ 수상 정보 추출: "${awardText}"`);
                 }
               }
             }
@@ -1821,7 +2047,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
 
           // 수상 정보를 못 찾은 경우 대체 방법으로 시도
           if (result.awards.length === 0) {
-            console.log('⚠️ 수상 라벨을 통한 추출 실패, 패턴 매칭으로 시도...');
+            logger.info('⚠️ 수상 라벨을 통한 추출 실패, 패턴 매칭으로 시도...');
 
             // 전체 텍스트에서 수상 패턴 찾기
             const allText = document.body.textContent || '';
@@ -1846,21 +2072,21 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                 });
               }
 
-              console.log(`✅ 패턴 매칭으로 수상 정보 추출: "${fullAward}"`);
+              logger.info(`✅ 패턴 매칭으로 수상 정보 추출: "${fullAward}"`);
             }
           }
 
-          console.log(`🏆 수상 정보 추출 완료: ${result.awards.length}개`);
+          logger.info(`🏆 수상 정보 추출 완료: ${result.awards.length}개`);
 
         } catch (e) {
-          console.log('❌ 수상 정보 추출 오류:', e.message);
+          logger.info('❌ 수상 정보 추출 오류:', e.message);
         }
 
         // AI 분석 데이터 추출 - 완전히 새로운 
         result.aiAnalysis = { pros: [], cons: [] };
         
         try {
-          console.log('🤖 AI 분석 추출 시작 (실제 구조 기반)...');
+          logger.info('🤖 AI 분석 추출 시작 (실제 구조 기반)...');
           
           // 1. AI 분석 섹션 찾기 (실제 구조)
           const aiSections = document.querySelectorAll('section');
@@ -1870,26 +2096,26 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             const text = section.textContent || '';
             if (text.includes('AI가 분석한 리뷰') || (text.includes('좋아요') && text.includes('아쉬워요'))) {
               aiSection = section;
-              console.log('✅ AI 분석 섹션 발견');
+              logger.info('✅ AI 분석 섹션 발견');
               break;
             }
           }
           
           if (aiSection) {
-            console.log('AI 섹션 HTML:', aiSection.innerHTML.substring(0, 500));
+            logger.info('AI 섹션 HTML:', aiSection.innerHTML.substring(0, 500));
             
             // 2. 좋아요/아쉬워요 컨테이너들 찾기
             const containers = aiSection.querySelectorAll('.grow');
-            console.log('컨테이너 수:', containers.length);
+            logger.info('컨테이너 수:', containers.length);
             
             containers.forEach((container, index) => {
               const headerText = container.querySelector('span')?.textContent || '';
-              console.log(`컨테이너 ${index + 1} 헤더:`, headerText);
+              logger.info(`컨테이너 ${index + 1} 헤더:`, headerText);
               
               if (headerText.includes('좋아요')) {
                 // 좋아요 섹션
                 const items = container.querySelectorAll('li');
-                console.log('좋아요 항목 수:', items.length);
+                logger.info('좋아요 항목 수:', items.length);
                 
                 items.forEach(item => {
                   const spans = item.querySelectorAll('span');
@@ -1899,7 +2125,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                     
                     if (name && !isNaN(count) && count > 0) {
                       result.aiAnalysis.pros.push({ name, count });
-                      console.log('✅ 장점 추가:', name, '(' + count + ')');
+                      logger.info('✅ 장점 추가:', name, '(' + count + ')');
                     }
                   }
                 });
@@ -1908,7 +2134,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               if (headerText.includes('아쉬워요')) {
                 // 아쉬워요 섹션
                 const items = container.querySelectorAll('li');
-                console.log('아쉬워요 항목 수:', items.length);
+                logger.info('아쉬워요 항목 수:', items.length);
                 
                 items.forEach(item => {
                   const spans = item.querySelectorAll('span');
@@ -1918,7 +2144,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                     
                     if (name && !isNaN(count) && count > 0) {
                       result.aiAnalysis.cons.push({ name, count });
-                      console.log('✅ 단점 추가:', name, '(' + count + ')');
+                      logger.info('✅ 단점 추가:', name, '(' + count + ')');
                     }
                   }
                 });
@@ -1927,10 +2153,10 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             
             // 3. 대안 방법: 직접적인 li 요소 탐색
             if (result.aiAnalysis.pros.length === 0 && result.aiAnalysis.cons.length === 0) {
-              console.log('대안 방법으로 AI 분석 추출...');
+              logger.info('대안 방법으로 AI 분석 추출...');
               
               const allLiElements = aiSection.querySelectorAll('li');
-              console.log('전체 li 요소 수:', allLiElements.length);
+              logger.info('전체 li 요소 수:', allLiElements.length);
               
               let isProsSection = false;
               let isConsSection = false;
@@ -1959,10 +2185,10 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                   if (name && !isNaN(count) && count > 0) {
                     if (isProsSection) {
                       result.aiAnalysis.pros.push({ name, count });
-                      console.log('🔄 장점 추가 (대안):', name, '(' + count + ')');
+                      logger.info('🔄 장점 추가 (대안):', name, '(' + count + ')');
                     } else if (isConsSection) {
                       result.aiAnalysis.cons.push({ name, count });
-                      console.log('🔄 단점 추가 (대안):', name, '(' + count + ')');
+                      logger.info('🔄 단점 추가 (대안):', name, '(' + count + ')');
                     }
                   }
                 }
@@ -1970,23 +2196,23 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             }
           }
           
-          console.log(`✅ AI 분석 추출 완료 - 장점: ${result.aiAnalysis.pros.length}개, 단점: ${result.aiAnalysis.cons.length}개`);
+          logger.info(`✅ AI 분석 추출 완료 - 장점: ${result.aiAnalysis.pros.length}개, 단점: ${result.aiAnalysis.cons.length}개`);
           
           // 결과 로깅
           result.aiAnalysis.pros.forEach((p, i) => {
-            console.log(`  장점 ${i+1}: ${p.name} (${p.count})`);
+            logger.info(`  장점 ${i+1}: ${p.name} (${p.count})`);
           });
           result.aiAnalysis.cons.forEach((c, i) => {
-            console.log(`  단점 ${i+1}: ${c.name} (${c.count})`);
+            logger.info(`  단점 ${i+1}: ${c.name} (${c.count})`);
           });
           
         } catch (e) {
-          console.log('❌ AI 분석 추출 오류:', e.message);
+          logger.info('❌ AI 분석 추출 오류:', e.message);
         }
         
         // 크롤링 실패 시 빈 데이터로 유지 (수동 편집 가능)
         if (result.aiAnalysis.pros.length === 0 && result.aiAnalysis.cons.length === 0) {
-          console.log('AI 분석 크롤링 실패 - 빈 데이터로 유지 (어드민에서 수동 편집 가능)');
+          logger.info('AI 분석 크롤링 실패 - 빈 데이터로 유지 (어드민에서 수동 편집 가능)');
           result.aiAnalysis = {
             pros: [],
             cons: []
@@ -1996,17 +2222,17 @@ async function crawlSingleProductDetail(browser, product, index, total) {
         // 영어 사이트 크롤링 코드 삭제됨 (한국 사이트 크롤링으로 대체)
         
         // 성분 정보 추출 - 이미 추출된 데이터 사용
-        console.log('🧪 성분 정보 처리 (이미 추출된 데이터 사용)...');
+        logger.info('🧪 성분 정보 처리 (이미 추출된 데이터 사용)...');
         
         // 이미 추출된 데이터가 있으면 사용
         if (Object.keys(result.ingredients).length > 0) {
-          console.log('✅ 이미 추출된 성분 데이터 사용:', result.ingredients);
+          logger.info('✅ 이미 추출된 성분 데이터 사용:', result.ingredients);
         } else {
-          console.log('❌ 성분 데이터 추출 실패 - 빈 객체로 유지');
+          logger.info('❌ 성분 데이터 추출 실패 - 빈 객체로 유지');
           result.ingredients = {};
         }
         
-        console.log('🧪 성분 정보 처리 완료:', result.ingredients);
+        logger.info('🧪 성분 정보 처리 완료:', result.ingredients);
         
         // 피부타입별 분석 초기화 (한국 사이트)
         result.skinTypeAnalysis = {
@@ -2017,7 +2243,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
         
         // 피부타입별 분석 추출 - 실제 HTML 구조 기반
         try {
-          console.log('🧴 피부타입별 분석 추출 시작 (실제 구조 기반)...');
+          logger.info('🧴 피부타입별 분석 추출 시작 (실제 구조 기반)...');
           
           // 1. 피부타입별 성분 섹션 찾기 (실제 구조)
           const sections = document.querySelectorAll('section');
@@ -2027,23 +2253,23 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             const text = section.textContent || '';
             if (text.includes('피부 타입별 성분')) {
               skinTypeSection = section;
-              console.log('✅ 피부타입별 성분 섹션 발견');
+              logger.info('✅ 피부타입별 성분 섹션 발견');
               break;
             }
           }
           
           if (skinTypeSection) {
-            console.log('피부타입 섹션 HTML:', skinTypeSection.innerHTML.substring(0, 1000));
+            logger.info('피부타입 섹션 HTML:', skinTypeSection.innerHTML.substring(0, 1000));
             
             // 2. 다양한 방법으로 피부타입별 데이터 추출
             
             // 개선된 방식: 실제 HTML 구조에 맞춘 정확한 추출
             const skinTypeRows = skinTypeSection.querySelectorAll('.flex.items-center.gap-x-24.py-8');
-            console.log('피부타입 행 수:', skinTypeRows.length);
+            logger.info('피부타입 행 수:', skinTypeRows.length);
 
             skinTypeRows.forEach((row, index) => {
               const text = row.textContent || '';
-              console.log(`피부타입 행 ${index + 1}:`, text.substring(0, 100));
+              logger.info(`피부타입 행 ${index + 1}:`, text.substring(0, 100));
 
               // 실제 HTML 구조에 맞춘 정확한 셀렉터 사용
               // 좋아요 숫자: .text-mint-primary 클래스 (썸업 아이콘 옆)
@@ -2052,14 +2278,14 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               const mintSpans = row.querySelectorAll('.text-mint-primary');
               const redSpans = row.querySelectorAll('.text-red-primary');
 
-              console.log(`행 ${index + 1} - 민트 span 수: ${mintSpans.length}, 레드 span 수: ${redSpans.length}`);
+              logger.info(`행 ${index + 1} - 민트 span 수: ${mintSpans.length}, 레드 span 수: ${redSpans.length}`);
 
               let good = 0, bad = 0;
 
               // 좋아요 숫자 찾기 (SVG 아이콘 다음의 span)
               mintSpans.forEach(span => {
                 const spanText = span.textContent.trim();
-                console.log(`민트 span 텍스트: "${spanText}"`);
+                logger.info(`민트 span 텍스트: "${spanText}"`);
                 if (/^\d+$/.test(spanText)) {
                   good = parseInt(spanText) || 0;
                 }
@@ -2068,32 +2294,32 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               // 아쉬워요 숫자 찾기
               redSpans.forEach(span => {
                 const spanText = span.textContent.trim();
-                console.log(`레드 span 텍스트: "${spanText}"`);
+                logger.info(`레드 span 텍스트: "${spanText}"`);
                 if (/^\d+$/.test(spanText)) {
                   bad = parseInt(spanText) || 0;
                 }
               });
 
-              console.log(`행 ${index + 1} 추출된 값 - 좋아요: ${good}, 아쉬워요: ${bad}`);
+              logger.info(`행 ${index + 1} 추출된 값 - 좋아요: ${good}, 아쉬워요: ${bad}`);
 
               // 피부타입 구분
               if (text.includes('지성 피부')) {
                 result.skinTypeAnalysis.oily = { good, bad };
-                console.log('✅ 지성 피부:', result.skinTypeAnalysis.oily);
+                logger.info('✅ 지성 피부:', result.skinTypeAnalysis.oily);
               }
               else if (text.includes('건성 피부')) {
                 result.skinTypeAnalysis.dry = { good, bad };
-                console.log('✅ 건성 피부:', result.skinTypeAnalysis.dry);
+                logger.info('✅ 건성 피부:', result.skinTypeAnalysis.dry);
               }
               else if (text.includes('민감성 피부')) {
                 result.skinTypeAnalysis.sensitive = { good, bad };
-                console.log('✅ 민감성 피부:', result.skinTypeAnalysis.sensitive);
+                logger.info('✅ 민감성 피부:', result.skinTypeAnalysis.sensitive);
               }
             });
           }
           
           
-          console.log('🧴 피부타입별 분석 추출 결과:', result.skinTypeAnalysis);
+          logger.info('🧴 피부타입별 분석 추출 결과:', result.skinTypeAnalysis);
           
           // 성공 여부 확인
           const hasValidSkinType = Object.values(result.skinTypeAnalysis).some(type => 
@@ -2101,25 +2327,25 @@ async function crawlSingleProductDetail(browser, product, index, total) {
           );
           
           if (hasValidSkinType) {
-            console.log('✅ 피부타입별 분석 추출 성공!');
+            logger.info('✅ 피부타입별 분석 추출 성공!');
           } else {
-            console.log('❌ 피부타입별 분석 추출 실패 - 빈 데이터로 유지');
+            logger.info('❌ 피부타입별 분석 추출 실패 - 빈 데이터로 유지');
           }
           
         } catch (e) {
-          console.log('❌ 피부타입 분석 추출 오류:', e.message);
+          logger.info('❌ 피부타입 분석 추출 오류:', e.message);
         }
         
-        console.log('한국 사이트 상세 데이터 추출 완료:', result);
+        logger.info('한국 사이트 상세 데이터 추출 완료:', result);
         return result;
       }, ingredientsData);
 
-      console.log(`📄 한국 사이트 상세 데이터 추출 결과 (${product.name}):`, JSON.stringify(detail, null, 2));
+      logger.info(`📄 한국 사이트 상세 데이터 추출 결과 (${product.name}):`, JSON.stringify(detail, null, 2));
 
       return detail;
 
     } catch (error) {
-      console.error(`❌ 한국 사이트 상세 페이지 크롤링 오류 (${product.name}):`, error.message);
+      logger.error(`❌ 한국 사이트 상세 페이지 크롤링 오류 (${product.name}):`, error.message);
 
       // 페이지 정리 (에러 발생 시에도 항상 실행)
       try {
@@ -2127,20 +2353,20 @@ async function crawlSingleProductDetail(browser, product, index, total) {
           await page.close();
         }
       } catch (closeError) {
-        console.log(`⚠️ 페이지 정리 실패 (${product.name}):`, closeError.message);
+        logger.info(`⚠️ 페이지 정리 실패 (${product.name}):`, closeError.message);
       }
 
       // "Execution context was destroyed" 오류 시 재시도
       if (error.message.includes('Execution context was destroyed') && attempts < maxRetries) {
         attempts++;
-        console.log(`🔄 "Execution context destroyed" 감지, 재시도 실행 (${attempts}/${maxRetries})`);
+        logger.info(`🔄 "Execution context destroyed" 감지, 재시도 실행 (${attempts}/${maxRetries})`);
         continue; // while 루프 계속
       }
 
       // 재시도 횟수 초과하거나 다른 오류면 기본값 반환
       attempts++;
       if (attempts > maxRetries) {
-        console.log(`❌ 최대 재시도 횟수 초과 (${product.name})`);
+        logger.info(`❌ 최대 재시도 횟수 초과 (${product.name})`);
       }
       break; // while 루프 종료
     } finally {
@@ -2150,7 +2376,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
           await page.close();
         }
       } catch (finallyError) {
-        console.log(`⚠️ 최종 페이지 정리 실패 (${product.name}):`, finallyError.message);
+        logger.info(`⚠️ 최종 페이지 정리 실패 (${product.name}):`, finallyError.message);
       }
     }
 
@@ -2163,13 +2389,13 @@ async function crawlSingleProductDetail(browser, product, index, total) {
   }
 
   // 모든 재시도 실패 시 기본값 반환
-  console.log(`❌ 모든 재시도 실패, 기본값 반환: ${product.name}`);
+  logger.info(`❌ 모든 재시도 실패, 기본값 반환: ${product.name}`);
   return getDefaultDetailData();
 }
 
 // 브라우저 준비 상태 확인 및 워밍업
 async function warmupBrowser(browser) {
-  console.log('🔥 브라우저 워밍업 시작...');
+  logger.info('🔥 브라우저 워밍업 시작...');
   let warmupPage = null;
 
   try {
@@ -2190,19 +2416,19 @@ async function warmupBrowser(browser) {
     });
 
     if (isReady) {
-      console.log('✅ 브라우저 워밍업 완료 - 준비 상태 확인됨');
+      logger.info('✅ 브라우저 워밍업 완료 - 준비 상태 확인됨');
     } else {
-      console.log('⚠️ 브라우저 워밍업 완료 - 하지만 완전하지 않을 수 있음');
+      logger.info('⚠️ 브라우저 워밍업 완료 - 하지만 완전하지 않을 수 있음');
     }
 
   } catch (error) {
-    console.log('⚠️ 브라우저 워밍업 중 오류:', error.message);
+    logger.info('⚠️ 브라우저 워밍업 중 오류:', error.message);
   } finally {
     if (warmupPage && !warmupPage.isClosed()) {
       try {
         await warmupPage.close();
       } catch (e) {
-        console.log('⚠️ 워밍업 페이지 정리 실패:', e.message);
+        logger.info('⚠️ 워밍업 페이지 정리 실패:', e.message);
       }
     }
   }
@@ -2213,53 +2439,15 @@ async function warmupBrowser(browser) {
 
 // 동시 처리로 성능 향상된 상세 페이지 크롤링 함수
 async function crawlKoreanDetailPages(browser, products) {
-  console.log(`📄 한국 사이트 상세 페이지 크롤링 시작: 총 ${products.length}개 제품`);
+  logger.info(`📄 한국 사이트 상세 페이지 크롤링 시작: 총 ${products.length}개 제품`);
 
   // 첫 번째 배치 전 브라우저 워밍업
   await warmupBrowser(browser);
 
-  const results = [];
-  const batchSize = CONFIG.LIMITS.CONCURRENT_PAGES;
+  // Phase 3 개선: crawlInBatches 사용하여 병렬 처리
+  const results = await crawlInBatches(browser, products, crawlSingleProductDetail, CONFIG.LIMITS.CONCURRENT_PAGES || 3);
 
-  // 제품들을 배치로 나누어 점진적 처리 (안정성 향상)
-  for (let i = 0; i < products.length; i += batchSize) {
-    const batch = products.slice(i, i + batchSize);
-    console.log(`📦 배치 처리 중: ${i + 1}-${Math.min(i + batchSize, products.length)}/${products.length}`);
-
-    const batchResults = [];
-
-    // 배치 내에서도 점진적 생성 (동시 생성 충돌 방지)
-    for (let j = 0; j < batch.length; j++) {
-      const product = batch[j];
-      const productIndex = i + j;
-
-      // 첫 번째 제품이 아니면 약간의 지연 (리소스 경합 방지)
-      if (j > 0) {
-        await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 100));
-      }
-
-      try {
-        console.log(`📄 개별 처리 시작: ${productIndex + 1}/${products.length} - ${product.name}`);
-        const result = await crawlSingleProductDetail(browser, product, productIndex, products.length);
-        batchResults.push(result);
-        console.log(`✅ 개별 처리 완료: ${productIndex + 1}/${products.length} - ${product.name}`);
-      } catch (error) {
-        console.error(`❌ 개별 처리 실패 (${product.name}):`, error.message);
-        // 개별 실패 시 기본값으로 처리
-        batchResults.push(getDefaultDetailData());
-      }
-    }
-
-    results.push(...batchResults);
-    console.log(`✅ 배치 완료: ${i + 1}-${Math.min(i + batchSize, products.length)}/${products.length} (성공: ${batchResults.length}개)`);
-
-    // 배치 간 간격 (서버 부하 방지)
-    if (i + batchSize < products.length) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-  }
-
-  console.log(`📄 한국 사이트 상세 페이지 크롤링 완료: ${results.length}개`);
+  logger.info(`📄 한국 사이트 상세 페이지 크롤링 완료: ${results.length}개`);
   return results;
 }
 
