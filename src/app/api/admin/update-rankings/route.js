@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '../../../../../lib/mongodb';
 import Ranking from '../../../../../models/Ranking';
-import { crawlHwahaeRealData } from '../../../../lib/hybrid-crawler';
+import { crawlHwahaeRealData } from '../../../../../src/lib/hybrid-crawler';
 
 // 유효한 화장품 성분 필터링 함수
 function filterValidIngredients(ingredientsList) {
@@ -107,6 +107,9 @@ function mapEnhancedIngredients(rawIngredients) {
     fullIngredientsList: filterValidIngredients(fullIngredientsList),
     purposeBasedIngredients: purposeBasedIngredients,
 
+    // 기능성 성분 상세 리스트 추가
+    functionalIngredientsList: rawIngredients.functionalIngredientsList || {},
+
     // 원본 크롤링 데이터 보존
     componentStats: componentStats,
 
@@ -206,6 +209,8 @@ export async function POST(request) {
           hasCategoryRanking: !!item.categoryRanking,
           hasAiAnalysis: !!item.aiAnalysis,
           hasIngredients: !!item.ingredients,
+          hasFunctionalIngredients: !!item.functionalIngredients,
+          functionalIngredientsKeys: Object.keys(item.functionalIngredients || {}),
           hasSkinTypeAnalysis: !!item.skinTypeAnalysis,
           hasAwards: !!item.awards,
           awardsCount: item.awards?.length || 0,
@@ -227,6 +232,8 @@ export async function POST(request) {
         themeId: themeId,
         // 개선된 성분 정보로 덮어쓰기
         ingredients: enhancedIngredients,
+        // 기능성 성분 상세 리스트 보존
+        functionalIngredients: item.functionalIngredients || {},
         // 수상 정보 보존 (중요!)
         awards: item.awards || [],
         // 크롤링 메타데이터 추가
@@ -245,6 +252,8 @@ export async function POST(request) {
           hasCategoryRanking: !!mappedItem.categoryRanking,
           hasAiAnalysis: !!mappedItem.aiAnalysis,
           hasIngredients: !!mappedItem.ingredients,
+          hasFunctionalIngredients: !!mappedItem.functionalIngredients,
+          functionalIngredientsKeys: Object.keys(mappedItem.functionalIngredients || {}),
           hasSkinTypeAnalysis: !!mappedItem.skinTypeAnalysis,
           hasCrawlingMetadata: !!mappedItem.crawlingMetadata,
           hasAwards: !!mappedItem.awards,

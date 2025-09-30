@@ -137,6 +137,11 @@ const RankingSchema = new mongoose.Schema({
       }
     }
   },
+  // 기능성 성분 상세 리스트 (주름개선, 미백 등)
+  functionalIngredients: {
+    type: Map,
+    of: [String]
+  },
   skinTypeAnalysis: {
     oily: {
       good: Number,

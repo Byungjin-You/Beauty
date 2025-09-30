@@ -209,8 +209,14 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
         skinTypeDryGood: (product.skinTypeAnalysis?.dry?.good || '').toString(),
         skinTypeDryBad: (product.skinTypeAnalysis?.dry?.bad || '').toString(),
         skinTypeSensitiveGood: (product.skinTypeAnalysis?.sensitive?.good || '').toString(),
-        skinTypeSensitiveBad: (product.skinTypeAnalysis?.sensitive?.bad || '').toString()
+        skinTypeSensitiveBad: (product.skinTypeAnalysis?.sensitive?.bad || '').toString(),
+        functionalIngredients: product.functionalIngredients || {} // 기능성 성분 상세 리스트 추가
       };
+
+      // 기능성 성분 데이터 디버깅
+      console.log('🔍 ProductDetailModal - product 전체:', product);
+      console.log('🔍 ProductDetailModal - functionalIngredients:', product.functionalIngredients);
+      console.log('🔍 ProductDetailModal - formDataObject.functionalIngredients:', formDataObject.functionalIngredients);
 
       setFormData(formDataObject);
       setOriginalData(formDataObject); // 원본 데이터 저장
@@ -978,15 +984,77 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
             </div>
           </div>
 
-          {/* 리뷰 분석 섹션 */}
+
+          {/* 기능성 성분 섹션 */}
           <div>
             <h3 className="text-lg font-semibold text-label-common_5 mb-4 flex items-center">
-              <svg className="w-5 h-5 mr-2" style={{ color: '#604aff' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+              <svg className="w-5 h-5 mr-2" style={{ color: '#10b981' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
               </svg>
-              리뷰 분석
+              기능성 성분
             </h3>
-            {/* 별점 분포 섹션 삭제됨 */}
+
+            {/* 기능성 성분 리스트 */}
+            {console.log('🎯 렌더링 시점 - formData.functionalIngredients:', formData.functionalIngredients)}
+            {formData.functionalIngredients && Object.keys(formData.functionalIngredients).length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {Object.entries(formData.functionalIngredients).map(([type, ingredients]) => (
+                  <div key={type} className="bg-gradient-to-r from-green-50 to-blue-50 p-4 rounded-lg border border-green-200">
+                    <h4 className="font-semibold text-sm text-gray-700 mb-2 flex items-center">
+                      {type === '주름 개선' && (
+                        <>
+                          <svg className="w-4 h-4 mr-2 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M4 12h16M4 17h10" />
+                          </svg>
+                          주름 개선
+                        </>
+                      )}
+                      {type === '피부 미백' && (
+                        <>
+                          <svg className="w-4 h-4 mr-2 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707" />
+                          </svg>
+                          피부 미백
+                        </>
+                      )}
+                      {type === '자외선 차단' && (
+                        <>
+                          <svg className="w-4 h-4 mr-2 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                          </svg>
+                          자외선 차단
+                        </>
+                      )}
+                      {type === '피부 보습' && (
+                        <>
+                          <svg className="w-4 h-4 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                          </svg>
+                          피부 보습
+                        </>
+                      )}
+                      {!['주름 개선', '피부 미백', '자외선 차단', '피부 보습'].includes(type) && type}
+                    </h4>
+                    {Array.isArray(ingredients) && ingredients.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {ingredients.map((ingredient, idx) => (
+                          <span key={idx} className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-white text-gray-700 border border-gray-300">
+                            {ingredient}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500 italic">성분 정보 없음</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                <p className="text-sm text-gray-500 text-center">기능성 성분 정보가 없습니다.</p>
+                <p className="text-xs text-gray-400 text-center mt-1">크롤링 시 기능성 성분이 있는 경우 자동으로 표시됩니다.</p>
+              </div>
+            )}
           </div>
 
           {/* 성분 정보 섹션 */}

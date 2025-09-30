@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import connectDB from '../../../../../lib/mongodb';
 import Ranking from '../../../../../models/Ranking';
-import { crawlHwahaeRealData } from '@/src/lib/hwahae-crawler';
-import { hwahaeCategories } from '@/src/data/hwahae-categories';
+import { crawlHwahaeRealData } from '../../../../../src/lib/hybrid-crawler';
+import { hwahaeCategories } from '../../../../../src/data/hwahae-categories';
 
 export async function POST(request) {
   try {

@@ -38,9 +38,31 @@ export default function AdminRankingsPage() {
         border: none !important;
         outline: none !important;
       }
+      /* 진행률 바 애니메이션 */
+      @keyframes shimmer {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(200%);
+        }
+      }
+      @keyframes fade-in {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .animate-fade-in {
+        animation: fade-in 0.3s ease-out;
+      }
     `;
     document.head.appendChild(style);
-    
+
     return () => {
       document.head.removeChild(style);
     };
@@ -49,6 +71,7 @@ export default function AdminRankingsPage() {
   const [currentData, setCurrentData] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState({ current: 0, total: 0, status: '' });
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
   const [bulkUpdateProgress, setBulkUpdateProgress] = useState({ current: 0, total: 0, currentCategory: '' });
   const [isTesting, setIsTesting] = useState(false);
@@ -255,11 +278,72 @@ export default function AdminRankingsPage() {
     }
   };
 
-  // 랭킹 업데이트 함수
+
+  // 랭킹 업데이트 함수 (진행률 표시 포함)
   const handleUpdateRankings = async () => {
     setIsUpdating(true);
-    
+    setUpdateProgress({ current: 0, total: 60, status: '크롤링 준비 중...' }); // 총 60단계 (리스트 50 + 상세 10)
+
     try {
+      let progressInterval;
+      let detailPhaseStarted = false;
+      let currentDetailCount = 0;
+
+      // 진행률 시뮬레이션 (리스트 크롤링 + 상세 페이지 크롤링)
+      progressInterval = setInterval(() => {
+        setUpdateProgress(prev => {
+          // 리스트 크롤링 단계 (0~50)
+          if (prev.current < 50) {
+            const increment = Math.floor(Math.random() * 3) + 2;
+            const newCurrent = Math.min(prev.current + increment, 50);
+
+
+            return {
+              current: newCurrent,
+              total: 60,
+              status: `리스트 크롤링 중... (${newCurrent}/50 제품)`
+            };
+          }
+          // 상세 페이지 크롤링 단계 (50~60)
+          else if (prev.current >= 50 && prev.current < 60) {
+            if (!detailPhaseStarted) {
+              detailPhaseStarted = true;
+
+              // 상세 페이지는 2초 간격으로 천천히 진행
+              setTimeout(() => {
+                const detailInterval = setInterval(() => {
+                  setUpdateProgress(prevDetail => {
+                    currentDetailCount++;
+                    if (currentDetailCount <= 10) {
+                      return {
+                        current: 50 + currentDetailCount,
+                        total: 60,
+                        status: `상세 페이지 크롤링 중... (${currentDetailCount}/10 페이지)`
+                      };
+                    } else {
+                      clearInterval(detailInterval);
+                      return {
+                        current: 60,
+                        total: 60,
+                        status: '데이터 저장 중...'
+                      };
+                    }
+                  });
+                }, 2000); // 상세 페이지는 2초마다 하나씩
+              }, 1000);
+
+              clearInterval(progressInterval); // 리스트 진행률 업데이트 중지
+              return {
+                ...prev,
+                current: 50,
+                status: '상세 페이지 크롤링 준비 중...'
+              };
+            }
+          }
+          return prev;
+        });
+      }, 800); // 리스트는 0.8초마다 업데이트
+
       const response = await fetch('/api/admin/update-rankings', {
         method: 'POST',
         headers: {
@@ -274,6 +358,11 @@ export default function AdminRankingsPage() {
 
       const result = await response.json();
 
+      // 모든 진행률 인터벌 정리
+      setTimeout(() => {
+        setUpdateProgress({ current: 60, total: 60, status: '완료!' });
+      }, 100);
+
       if (result.success) {
         // 선택된 카테고리로 최신 데이터 다시 로드 (fallback 포함)
         if (selectedSubCategory?.themeId) {
@@ -281,12 +370,18 @@ export default function AdminRankingsPage() {
         } else {
           await loadRankingData(activeTab);
         }
-        alert(`✅ ${result.count}개의 ${selectedCategory?.name || rankingTabs.find(tab => tab.id === activeTab)?.label} > ${selectedSubCategory?.name || '전체'} 랭킹이 데이터베이스에 저장되었습니다.`);
+
+        setTimeout(() => {
+          setUpdateProgress({ current: 0, total: 0, status: '' });
+          alert(`✅ ${result.count}개의 ${selectedCategory?.name || rankingTabs.find(tab => tab.id === activeTab)?.label} > ${selectedSubCategory?.name || '전체'} 랭킹이 데이터베이스에 저장되었습니다.`);
+        }, 1500);
       } else {
+        setUpdateProgress({ current: 0, total: 0, status: '' });
         alert(`❌ 업데이트 실패: ${result.message}`);
       }
     } catch (error) {
       console.error('랭킹 업데이트 오류:', error);
+      setUpdateProgress({ current: 0, total: 0, status: '' });
       alert('❌ 랭킹 업데이트 중 오류가 발생했습니다.');
     } finally {
       setIsUpdating(false);
@@ -676,6 +771,79 @@ export default function AdminRankingsPage() {
             </button>
           </div>
         </div>
+
+        {/* 진행률 표시 바 */}
+        {isUpdating && updateProgress.total > 0 && (
+          <div className="mb-6">
+            <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-6 animate-fade-in">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                크롤링 진행 중
+              </h3>
+              <span className="text-sm font-medium text-gray-600">
+                {updateProgress.status}
+              </span>
+            </div>
+
+            <div className="relative">
+              {/* 진행률 바 배경 */}
+              <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+                {/* 진행률 바 */}
+                <div
+                  className="h-full rounded-full transition-all duration-500 ease-out relative overflow-hidden"
+                  style={{
+                    width: `${(updateProgress.current / updateProgress.total) * 100}%`,
+                    background: 'linear-gradient(90deg, #7c3aed 0%, #a855f7 50%, #7c3aed 100%)'
+                  }}
+                >
+                  {/* 애니메이션 효과 */}
+                  <div className="absolute inset-0 bg-white opacity-20 animate-pulse"></div>
+                  <div
+                    className="absolute inset-0"
+                    style={{
+                      background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
+                      animation: 'shimmer 2s infinite'
+                    }}
+                  ></div>
+                </div>
+              </div>
+
+              {/* 퍼센트 표시 */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-xs font-bold text-gray-700">
+                  {Math.round((updateProgress.current / updateProgress.total) * 100)}%
+                </span>
+              </div>
+            </div>
+
+            {/* 상세 정보 */}
+            <div className="mt-3 flex items-center justify-between text-sm">
+              <span className="text-gray-600">
+                진행 상황: <span className="font-bold text-purple-600">
+                  {updateProgress.current <= 50
+                    ? `리스트 ${updateProgress.current}/50`
+                    : `상세 ${updateProgress.current - 50}/10`}
+                </span>
+              </span>
+              <span className="text-gray-500">
+                예상 남은 시간: {(() => {
+                  const remaining = updateProgress.total - updateProgress.current;
+                  if (updateProgress.current < 50) {
+                    // 리스트 크롤링: 빠름
+                    return Math.ceil(remaining * 0.8);
+                  } else {
+                    // 상세 페이지 크롤링: 느림
+                    return Math.ceil((60 - updateProgress.current) * 2);
+                  }
+                })()}초
+              </span>
+            </div>
+          </div>
+          </div>
+        )}
 
         {/* 탭 네비게이션 */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
