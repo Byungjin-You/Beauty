@@ -26,7 +26,7 @@ const CONFIG = {
     DETAIL_ITEMS: 10,
     INGREDIENTS_LIST: 30,
     LOG_CONTAINERS: 20,
-    CONCURRENT_PAGES: 10,  // 10개로 증가 (headless 모드에서 안정적)
+    CONCURRENT_PAGES: 5,  // 병렬 처리 배치 크기 (안정성과 속도 균형)
     PAGE_POOL_SIZE: 5      // 페이지 풀 크기
   },
   BROWSER_ARGS: [
@@ -2336,29 +2336,26 @@ async function crawlKoreanDetailPages(browser, products) {
     const batch = products.slice(i, i + batchSize);
     console.log(`📦 배치 처리 중: ${i + 1}-${Math.min(i + batchSize, products.length)}/${products.length}`);
 
-    const batchResults = [];
-
-    // 배치 내에서도 점진적 생성 (동시 생성 충돌 방지)
-    for (let j = 0; j < batch.length; j++) {
-      const product = batch[j];
+    // ✅ 병렬 처리로 성능 개선 (Promise.all 사용)
+    const batchPromises = batch.map(async (product, j) => {
       const productIndex = i + j;
 
-      // 첫 번째 제품이 아니면 약간의 지연 (리소스 경합 방지)
-      if (j > 0) {
-        await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 100));
-      }
+      // 약간의 지연으로 리소스 경합 방지 (0ms, 200ms, 400ms, ...)
+      await new Promise(resolve => setTimeout(resolve, j * 200));
 
       try {
         console.log(`📄 개별 처리 시작: ${productIndex + 1}/${products.length} - ${product.name}`);
         const result = await crawlSingleProductDetail(browser, product, productIndex, products.length);
-        batchResults.push(result);
         console.log(`✅ 개별 처리 완료: ${productIndex + 1}/${products.length} - ${product.name}`);
+        return result;
       } catch (error) {
         console.error(`❌ 개별 처리 실패 (${product.name}):`, error.message);
         // 개별 실패 시 기본값으로 처리
-        batchResults.push(getDefaultDetailData());
+        return getDefaultDetailData();
       }
-    }
+    });
+
+    const batchResults = await Promise.all(batchPromises);
 
     results.push(...batchResults);
     console.log(`✅ 배치 완료: ${i + 1}-${Math.min(i + batchSize, products.length)}/${products.length} (성공: ${batchResults.length}개)`);
