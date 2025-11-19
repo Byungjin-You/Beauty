@@ -1300,6 +1300,29 @@ export default function AdminRankingsPage() {
                               </div>
                             </div>
                           )}
+
+                          {product.functionalIngredients && Object.keys(product.functionalIngredients).length > 0 && (
+                            <div className="mt-3 bg-green-50 p-3 rounded-lg border border-green-200">
+                              <h4 className="font-medium text-green-800 mb-2 flex items-center">
+                                <svg className="w-4 h-4 mr-1 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                기능성 성분 상세
+                              </h4>
+                              <div className="text-xs text-gray-600 space-y-2">
+                                {Object.entries(product.functionalIngredients).map(([type, ingredients]) => (
+                                  <div key={type} className="border-l-2 border-green-300 pl-2">
+                                    <div className="font-medium text-green-700 mb-1">{type} ({Array.isArray(ingredients) ? ingredients.length : 0}개)</div>
+                                    {Array.isArray(ingredients) && ingredients.length > 0 && (
+                                      <div className="text-gray-500 text-xs">
+                                        {ingredients.join(', ')}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

@@ -73,6 +73,16 @@ const extractIngredientAnalysisInfo = (ingredients) => {
     analysisText.push(`미백 성분: ${analysisData.brighteningIngredients}개`);
   }
 
+  // 자외선 차단 성분 추가 (functionalIngredients에서 추출)
+  if (ingredients.functionalIngredients?.['자외선 차단']) {
+    const sunscreenCount = Array.isArray(ingredients.functionalIngredients['자외선 차단'])
+      ? ingredients.functionalIngredients['자외선 차단'].length
+      : 0;
+    if (sunscreenCount > 0) {
+      analysisText.push(`자외선 차단: ${sunscreenCount}개`);
+    }
+  }
+
   // 주의성분 정보
   if (analysisData?.cautionIngredients) {
     const { total, present } = analysisData.cautionIngredients;
@@ -1033,7 +1043,23 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
                           피부 보습
                         </>
                       )}
-                      {!['주름 개선', '피부 미백', '자외선 차단', '피부 보습'].includes(type) && type}
+                      {type === '주의성분' && (
+                        <>
+                          <svg className="w-4 h-4 mr-2 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-1.964-1.333-2.732 0L4.082 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                          주의성분
+                        </>
+                      )}
+                      {type === '알레르기 주의성분' && (
+                        <>
+                          <svg className="w-4 h-4 mr-2 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.618 5.984A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016zM12 9v2m0 4h.01" />
+                          </svg>
+                          알레르기 주의성분
+                        </>
+                      )}
+                      {!['주름 개선', '피부 미백', '자외선 차단', '피부 보습', '주의성분', '알레르기 주의성분'].includes(type) && type}
                     </h4>
                     {Array.isArray(ingredients) && ingredients.length > 0 ? (
                       <div className="flex flex-wrap gap-2">

@@ -1184,7 +1184,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
             const cleanText = buttonText.replace(/\s+/g, ' ').trim();
 
             // 모든 버튼 텍스트를 확인하기 위해 로그 추가
-            if (cleanText.includes('주름') || cleanText.includes('미백') || cleanText.includes('자외선') || cleanText.includes('보습')) {
+            if (cleanText.includes('주름') || cleanText.includes('미백') || cleanText.includes('자외선') || cleanText.includes('보습') || cleanText.includes('주의성분') || cleanText.includes('알레르기')) {
               console.log(`🎯 기능성 관련 버튼 발견: "${cleanText}"`);
             }
 
@@ -1193,19 +1193,27 @@ async function crawlSingleProductDetail(browser, product, index, total) {
               { key: '주름 개선', pattern: /주름\s*개선.*?(\d+)/ },
               { key: '피부 미백', pattern: /미백.*?(\d+)/ },
               { key: '자외선 차단', pattern: /자외선\s*차단.*?(\d+)/ },
-              { key: '피부 보습', pattern: /보습.*?(\d+)/ }
+              { key: '피부 보습', pattern: /보습.*?(\d+)/ },
+              { key: '주의성분', pattern: /(\d+)\s*가지\s*주의성분.*?(\d+)/ }, // 20가지 주의성분 3개 형태
+              { key: '알레르기 주의성분', pattern: /알레르기\s*주의성분.*?(\d+)/ }
             ];
 
             for (const funcType of functionalTypes) {
               if (cleanText.includes(funcType.key.split(' ')[0])) {
                 const match = cleanText.match(funcType.pattern);
-                if (match && parseInt(match[1]) > 0) {
-                  console.log(`✅ ${funcType.key} 성분 ${match[1]}개 발견 - 상세 정보 클릭`);
+
+                // 주의성분은 match[2] (실제 개수)를 사용, 나머지는 match[1] 사용
+                const count = (funcType.key === '주의성분' && match && match[2])
+                  ? parseInt(match[2])
+                  : (match ? parseInt(match[1]) : 0);
+
+                if (match && count > 0) {
+                  console.log(`✅ ${funcType.key} 성분 ${count}개 발견 - 상세 정보 클릭`);
 
                   try {
-                    // 버튼 클릭
+                    // ✅ 최적화: 버튼 클릭
                     button.click();
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await new Promise(resolve => setTimeout(resolve, 500)); // 1000ms → 500ms
 
                     // 팝업에서 성분 리스트 추출
                     const popup = document.querySelector('.fixed.inset-\\[0\\]');
@@ -1240,7 +1248,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
                         if (backdrop) backdrop.click();
                       }
 
-                      await new Promise(resolve => setTimeout(resolve, 500));
+                      await new Promise(resolve => setTimeout(resolve, 300)); // 500ms → 300ms
                     }
                   } catch (err) {
                     // console.log(`⚠️ ${funcType.key} 팝업 처리 중 오류:`, err.message);
@@ -1609,7 +1617,7 @@ async function crawlSingleProductDetail(browser, product, index, total) {
       
       console.log('🧪 성분 정보 즉시 추출 완료:', ingredientsData);
       console.log('🔍 성분 데이터 상세:', JSON.stringify(ingredientsData, null, 2));
-      await new Promise(resolve => setTimeout(resolve, 2000)); // 추가 대기
+      await new Promise(resolve => setTimeout(resolve, 1000)); // ✅ 2000ms → 1000ms 최적화
       
       // 4. 피부타입별 성분 섹션으로 스크롤
       console.log('🧴 피부타입별 성분 섹션으로 스크롤...');
