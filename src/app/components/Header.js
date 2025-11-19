@@ -88,27 +88,25 @@ const Header = () => {
 
   return (
     <div className="sticky top-0 w-full h-14 items-center flex justify-between px-4 bg-white z-30">
-        <div className="cursor-pointer flex-none flex items-center gap-1 logo-container" onClick={handleLogoClick}>
-          <video 
-            width="32" 
-            height="32" 
-            autoPlay
-            loop
-            muted
-            playsInline
-            className="cursor-pointer flex-none"
+        <div className="cursor-pointer flex-none flex items-center gap-2 logo-container" onClick={handleLogoClick}>
+          <img
+            alt="Logo"
+            loading="lazy"
+            width="24"
+            height="24"
+            decoding="async"
+            className="cursor-pointer flex-none -translate-y-0.5"
+            src="/images/3d-glassy-gradient-glass-asterisk-sign.png"
             style={{ objectFit: 'cover' }}
-          >
-            <source src="/images/header-logo-animation.mp4" type="video/mp4" />
-          </video>
-          <img 
-            alt="TOKTOK" 
-            loading="lazy" 
-            width="120" 
-            height="32" 
-            decoding="async" 
-            className="cursor-pointer flex-none hover:opacity-80 transition-opacity duration-200" 
-            src="/images/toktok-logo1.png" 
+          />
+          <img
+            alt="TOKTOK"
+            loading="lazy"
+            width="120"
+            height="32"
+            decoding="async"
+            className="cursor-pointer flex-none hover:opacity-80 transition-opacity duration-200"
+            src="/images/toktok-logo1.png"
             style={{ color: 'transparent' }}
           />
         </div>
