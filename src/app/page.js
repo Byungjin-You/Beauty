@@ -12,11 +12,19 @@ import SkinTypeRankingSection from "../components/sections/SkinTypeRankingSectio
 import AgeRecommendationSection from "../components/sections/AgeRecommendationSection";
 import TrendingBrandsSection from "../components/sections/TrendingBrandsSection";
 import Footer from "../components/sections/Footer";
-import BottomNavigation from "../components/sections/BottomNavigation";
 import BeautyFilterModal from "../components/common/BeautyFilterModal";
+import CategoryFilter from "../components/sections/CategoryFilter";
+import RealPicksProductList from "../components/sections/RealPicksProductList";
 
 export default function Home() {
   const [showBeautyFilter, setShowBeautyFilter] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [selectedSubcategory, setSelectedSubcategory] = useState("all");
+
+  const handleCategoryChange = (categoryId, subcategoryId) => {
+    setSelectedCategory(categoryId);
+    setSelectedSubcategory(subcategoryId);
+  };
 
   return (
     <div className="desktop:bg-background-common_2 bg-background-common_1">
@@ -44,7 +52,29 @@ export default function Home() {
                 
                 {/* 뷰티 어워드 섹션 */}
                 <AwardsSection />
-                
+
+                {/* The Real Picks 섹션 헤더 */}
+                <div className="flex flex-col">
+                  <div className="h-[56px] w-full flex justify-between items-center">
+                    <h3 className="text-label-common_5 leading-[150%] text-lg font-semibold">
+                      The Real Picks of Korean Users
+                    </h3>
+                    <a href="/ranking" className="flex ml-auto items-center gap-[8px]">
+                      <h5 className="text-label-common_4 leading-[150%] text-inherit text-[13px] font-semibold">전체보기</h5>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-label-common_4">
+                        <path d="M9 18L15 12L9 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"></path>
+                      </svg>
+                    </a>
+                  </div>
+                  {/* 카테고리 필터 */}
+                  <CategoryFilter onCategoryChange={handleCategoryChange} />
+                  {/* 제품 리스트 */}
+                  <RealPicksProductList
+                    categoryId={selectedCategory}
+                    subcategoryId={selectedSubcategory}
+                  />
+                </div>
+
                 {/* TikTok Reviews 섹션 */}
                 <TikTokReviewsSection />
                 
@@ -72,14 +102,10 @@ export default function Home() {
                 <Footer />
               </div>
               
-              {/* 하단 네비게이션을 위한 여백 (모바일/태블릿에서만) */}
-              <div className="desktop:hidden h-[60px]"></div>
               
             </div>
           </div>
           
-          {/* 하단 네비게이션 */}
-          <BottomNavigation />
           
         </div>
       </div>
