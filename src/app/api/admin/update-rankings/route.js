@@ -71,7 +71,8 @@ function filterValidIngredients(ingredientsList) {
 
 // 개선된 성분 정보 매핑 함수
 function mapEnhancedIngredients(rawIngredients) {
-  if (!rawIngredients) {
+  // 빈 객체이거나 데이터가 없으면 조용히 기본값 반환 (로그 스킵)
+  if (!rawIngredients || Object.keys(rawIngredients).length === 0) {
     return {
       total: 0,
       lowRisk: 0,
@@ -84,6 +85,7 @@ function mapEnhancedIngredients(rawIngredients) {
     };
   }
 
+  // 실제 데이터가 있을 때만 로그 출력
   console.log('🔍 mapEnhancedIngredients 입력 데이터:', JSON.stringify(rawIngredients, null, 2));
 
   // 개선된 크롤링 구조에서 데이터 추출
@@ -268,7 +270,15 @@ export async function POST(request) {
 
       return mappedItem;
     });
-    
+
+    // 성분 데이터 크롤링 요약 로그 (한 번만 출력)
+    const ingredientsStats = {
+      total: data.length,
+      withIngredients: data.filter(item => item.ingredients?.total > 0).length,
+      empty: data.filter(item => !item.ingredients?.total || item.ingredients.total === 0).length
+    };
+    console.log(`📊 성분 데이터 크롤링 요약: 전체 ${ingredientsStats.total}개 중 성분정보 있음 ${ingredientsStats.withIngredients}개, 없음 ${ingredientsStats.empty}개`);
+
     try {
       // MongoDB 연결 시도
       await connectDB();
