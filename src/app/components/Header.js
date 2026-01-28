@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
 
-const Header = () => {
+const Header = ({ showSearchIcon = false }) => {
   const router = useRouter();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -112,11 +112,27 @@ const Header = () => {
         </div>
 
         <div className="flex flex-none gap-3 ml-auto items-center">
-          <a className="w-7 h-7 p-0.5 hidden justify-center items-center ml-auto text-gray-600" href="/search">
+          {/* 검색 아이콘 - 스크롤 시 아래에서 위로 올라오며 나타남 */}
+          <button
+            className="w-7 h-7 p-0.5 flex justify-center items-center transition-all duration-500 ease-out"
+            style={{
+              color: '#484760',
+              opacity: showSearchIcon ? 1 : 0,
+              transform: showSearchIcon ? 'translateY(0) scale(1)' : 'translateY(20px) scale(0.8)',
+              pointerEvents: showSearchIcon ? 'auto' : 'none'
+            }}
+            onClick={() => {
+              // 검색 영역으로 스크롤
+              const contentBody = document.getElementById('content-body');
+              if (contentBody) {
+                contentBody.scrollTo({ top: 0, behavior: 'smooth' });
+              }
+            }}
+          >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20" className="w-full h-full">
               <path fill="currentColor" fillRule="evenodd" d="M14.167 8.75a5.417 5.417 0 1 1-10.833 0 5.417 5.417 0 0 1 10.833 0m-1.032 5.563a7.083 7.083 0 1 1 1.178-1.178l3.194 3.193a.833.833 0 1 1-1.178 1.179z" clipRule="evenodd"></path>
             </svg>
-          </a>
+          </button>
           <div className="relative flex items-center" ref={dropdownRef}>
             <button onClick={handleMyClick}>
               <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" fill="none">

@@ -76,11 +76,11 @@ const AwardsSection = () => {
             <div className="relative">
               {/* 배지 */}
               {item.badge && (
-                <span className="absolute right-0 flex items-center justify-center rounded-full h-[16px] px-[4px] text-[10px] bg-red-400 text-white z-10" style={{ fontWeight: 700, top: '-6px' }}>
+                <span className="absolute right-0 flex items-center justify-center rounded-full h-[16px] px-[5px] text-[10px] text-white z-10" style={{ fontWeight: 700, top: '-4px', backgroundColor: '#ff5d51' }}>
                   {item.badge}
                 </span>
               )}
-              <div className="w-[36px] h-[36px] flex items-center justify-center">
+              <div className="w-[45px] h-[45px] flex items-center justify-center">
                 <img
                   src={item.icon}
                   alt={item.name}
@@ -89,7 +89,7 @@ const AwardsSection = () => {
               </div>
             </div>
             {/* 라벨 */}
-            <div className="font-medium text-gray-600 text-[13px] leading-[18px] tracking-[-0.5px] w-full text-center mt-[6px]">
+            <div className="font-medium text-[12px] leading-[16px] tracking-[-0.5px] w-full text-center mt-[6px]" style={{ color: '#484760' }}>
               {item.name}
             </div>
           </a>

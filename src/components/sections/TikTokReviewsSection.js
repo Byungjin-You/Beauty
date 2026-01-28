@@ -108,11 +108,12 @@ const TikTokReviewsSection = () => {
       </div>
 
       {/* TikTok 리뷰 가로 스크롤 컨테이너 */}
-      <div 
-        className="flex overflow-x-scroll scrollbar-hide tablet:mx-[-24px] mx-[-16px] tablet:px-[24px] px-[16px]"
+      <div
+        className="flex overflow-x-auto overflow-y-hidden scrollbar-hide tablet:mx-[-24px] mx-[-16px] tablet:px-[24px] px-[16px]"
         data-tiktok-scroll
-        style={{ 
-          WebkitOverflowScrolling: 'touch'
+        style={{
+          WebkitOverflowScrolling: 'touch',
+          touchAction: 'pan-x pan-y'
         }}
       >
         <div className="flex gap-[12px]">
@@ -170,50 +171,11 @@ const TikTokReviewsSection = () => {
                                 </video>
                     
                     {/* 폴백 이미지 */}
-                    <img 
+                    <img
                       src={review.videoThumbnail}
                       alt={`TikTok 리뷰 ${index + 1}`}
                       className="w-full h-full object-cover hidden"
                     />
-                    
-                    {/* 재생 버튼 오버레이 */}
-                    <div 
-                      className={`absolute inset-0 flex items-center justify-center transition-opacity duration-300 ${
-                        playingVideo === review.id ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'
-                      }`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        const videoElement = e.currentTarget.previousSibling.previousSibling;
-                        
-                        if (playingVideo === review.id) {
-                          // 현재 재생 중인 비디오 일시정지
-                          videoElement.pause();
-                          setPlayingVideo(null);
-                        } else {
-                          // 다른 비디오들 모두 일시정지
-                          const allVideos = document.querySelectorAll('video');
-                          allVideos.forEach(video => video.pause());
-                          setPlayingVideo(null);
-                          
-                          // 현재 비디오 재생
-                          videoElement.play().then(() => {
-                            setPlayingVideo(review.id);
-                          }).catch(console.error);
-                        }
-                      }}
-                    >
-                      <div className="w-[60px] h-[60px] rounded-full bg-black/60 flex items-center justify-center hover:bg-black/80 transition-colors">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="white" className="ml-1">
-                          {playingVideo === review.id ? (
-                            // 일시정지 아이콘
-                            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
-                          ) : (
-                            // 재생 아이콘
-                            <path d="M8 5v14l11-7z"/>
-                          )}
-                        </svg>
-                      </div>
-                    </div>
 
                     {/* TikTok 브랜딩 오버레이 */}
                     <div className="absolute top-3 right-3">

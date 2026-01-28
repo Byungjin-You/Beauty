@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const RealPicksProductList = ({ categoryId, subcategoryId }) => {
   const [products, setProducts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(0);
+  const scrollContainerRef = useRef(null);
 
   // 카테고리 ID에 따른 themeId 매핑
   const categoryThemeMap = {
@@ -56,11 +58,11 @@ const RealPicksProductList = ({ categoryId, subcategoryId }) => {
       setIsLoading(true);
       try {
         const themeId = categoryThemeMap[subcategoryId] || categoryThemeMap[categoryId] || "5102";
-        const response = await fetch(`/api/admin/rankings?themeId=${themeId}&limit=5`);
+        const response = await fetch(`/api/admin/rankings?themeId=${themeId}&limit=12`);
         const result = await response.json();
 
         if (result.success && result.data.length > 0) {
-          setProducts(result.data.slice(0, 5));
+          setProducts(result.data.slice(0, 12));
         } else {
           setProducts([]);
         }
@@ -75,20 +77,40 @@ const RealPicksProductList = ({ categoryId, subcategoryId }) => {
     fetchProducts();
   }, [categoryId, subcategoryId]);
 
+  // 현재 페이지 인덱스 계산 (0 또는 1)
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const scrollLeft = container.scrollLeft;
+      const containerWidth = container.clientWidth;
+      // 스크롤 위치가 컨테이너 너비의 절반 이상이면 두 번째 페이지
+      const page = scrollLeft > containerWidth * 0.5 ? 1 : 0;
+      setCurrentPage(page);
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [products]);
+
   if (isLoading) {
     return (
       <div className="mt-[16px]">
-        <div className="space-y-[12px]">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="flex items-center gap-[16px] animate-pulse py-[10px]">
-              <div className="w-[140px] h-[140px] bg-gray-200 rounded-[12px]"></div>
-              <div className="flex-1 space-y-[10px]">
-                <div className="h-[16px] bg-gray-200 rounded w-3/4"></div>
-                <div className="h-[14px] bg-gray-200 rounded w-1/2"></div>
-                <div className="h-[14px] bg-gray-200 rounded w-1/3"></div>
+        <div className="flex overflow-x-auto scrollbar-hide mx-[-16px] px-[16px]">
+          <div className="grid grid-rows-2 grid-flow-col gap-[12px]">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="animate-pulse w-[110px]">
+                <div className="aspect-square bg-gray-200 rounded-[12px]"></div>
+                <div className="mt-[8px] space-y-[6px]">
+                  <div className="h-[12px] bg-gray-200 rounded w-full"></div>
+                  <div className="h-[12px] bg-gray-200 rounded w-3/4"></div>
+                  <div className="h-[10px] bg-gray-200 rounded w-1/2"></div>
+                  <div className="h-[12px] bg-gray-200 rounded w-2/3"></div>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -104,16 +126,30 @@ const RealPicksProductList = ({ categoryId, subcategoryId }) => {
 
   return (
     <div className="mt-[16px]">
-      <div className="space-y-[12px]">
-        {products.map((product, index) => (
-          <a
-            key={product.id || index}
-            href={product.link || "#"}
-            className="flex items-start gap-[16px] py-[10px] hover:bg-gray-50 rounded-[12px] transition-colors"
+      {/* 횡스크롤 컨테이너 - 스냅 스크롤 적용 */}
+      <div
+        ref={scrollContainerRef}
+        className="flex overflow-x-auto scrollbar-hide"
+        style={{
+          scrollSnapType: 'x mandatory',
+          WebkitOverflowScrolling: 'touch'
+        }}
+      >
+        {/* 6개씩 페이지로 묶기 */}
+        {[0, 6].map((startIdx) => (
+          <div
+            key={startIdx}
+            className="grid grid-rows-2 grid-cols-3 gap-x-[12px] gap-y-[16px] flex-shrink-0 w-full"
+            style={{ scrollSnapAlign: 'start', scrollSnapStop: 'always' }}
           >
-            {/* 제품 이미지 - 화면의 반 정도 차지 */}
-            <div className="flex-shrink-0">
-              <div className="w-[140px] h-[140px] rounded-[12px] overflow-hidden bg-white" style={{ border: '1px solid #f5f5f5' }}>
+            {products.slice(startIdx, startIdx + 6).map((product, index) => (
+              <a
+                key={product.id || index}
+                href={product.link || "#"}
+                className="flex flex-col"
+              >
+              {/* 제품 이미지 */}
+              <div className="aspect-square rounded-[12px] overflow-hidden bg-white" style={{ border: '1px solid #f5f5f5' }}>
                 <img
                   src={product.image}
                   alt={product.name}
@@ -123,57 +159,72 @@ const RealPicksProductList = ({ categoryId, subcategoryId }) => {
                   }}
                 />
               </div>
-            </div>
 
-            {/* 제품 정보 */}
-            <div className="flex-1 min-w-0 space-y-[4px]">
-              {/* 브랜드명 + 제품명 */}
-              <div className="leading-normal text-ellipsis block line-clamp-2">
-                <span className="text-[14px] text-label-common_4 font-medium">
+              {/* 제품 정보 */}
+              <div className="mt-[8px]">
+                {/* 브랜드명 - 1줄 고정 */}
+                <p className="text-[11px] text-label-common_4 leading-[1.4] line-clamp-1 h-[15px]">
                   {product.brand}
-                </span>
-                <span className="text-[14px] text-label-common_5 font-medium ml-[8px]">
+                </p>
+
+                {/* 제품명 - 2줄 고정 높이 */}
+                <p className="text-[12px] text-label-common_5 font-medium leading-[1.4] line-clamp-2 h-[34px] mt-[2px]">
                   {product.name}
-                </span>
-              </div>
+                </p>
 
-              {/* 별점 + 리뷰 수 */}
-              <div className="flex items-center gap-[2px]">
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="none" viewBox="0 0 24 24" className="text-yellow-400">
-                  <path fill="currentColor" d="M17.712 21.992c-.12 0-.25-.03-.36-.09l-5.347-2.958-5.347 2.959a.75.75 0 0 1-.79-.04.761.761 0 0 1-.31-.74l1.03-6.328-4.378-4.478c-.2-.2-.26-.5-.17-.76.09-.27.32-.46.6-.5l5.997-.92L11.315 2.4c.25-.53 1.11-.53 1.36 0l2.688 5.738 5.997.92c.28.04.51.24.6.5.09.269.02.559-.17.759l-4.358 4.478 1.03 6.328a.76.76 0 0 1-.74.88z"/>
-                </svg>
-                <span className="text-[12px] text-label-common_4">
-                  {product.rating?.toFixed(2) || "0.00"}
-                </span>
-                <span className="text-[11px] text-label-common_3">
-                  ({product.reviewCount?.toLocaleString() || 0})
-                </span>
-              </div>
+                {/* 별점 + 리뷰 수 */}
+                <div className="flex items-center gap-[2px] mt-[4px]">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="none" viewBox="0 0 24 24" className="text-yellow-400">
+                    <path fill="currentColor" d="M17.712 21.992c-.12 0-.25-.03-.36-.09l-5.347-2.958-5.347 2.959a.75.75 0 0 1-.79-.04.761.761 0 0 1-.31-.74l1.03-6.328-4.378-4.478c-.2-.2-.26-.5-.17-.76.09-.27.32-.46.6-.5l5.997-.92L11.315 2.4c.25-.53 1.11-.53 1.36 0l2.688 5.738 5.997.92c.28.04.51.24.6.5.09.269.02.559-.17.759l-4.358 4.478 1.03 6.328a.76.76 0 0 1-.74.88z"/>
+                  </svg>
+                  <span className="text-[11px] text-label-common_5 font-medium">
+                    {product.rating?.toFixed(2) || "0.00"}
+                  </span>
+                  <span className="text-[10px] text-label-common_3">
+                    ({product.reviewCount?.toLocaleString() || 0})
+                  </span>
+                </div>
 
-              {/* 가격 / 용량 */}
-              <div className="flex items-center gap-[6px]">
-                {product.price && (
-                  <span className="text-[14px] text-label-common_5 font-medium">{product.price}</span>
-                )}
-                {product.volume && (
-                  <>
-                    <span className="text-[12px] text-label-common_3">/</span>
-                    <span className="text-[12px] text-label-common_3">{product.volume}</span>
-                  </>
-                )}
+                {/* 가격 / 용량 */}
+                <div className="flex items-center gap-[4px] flex-wrap mt-[2px]">
+                  {product.price && (
+                    <span className="text-[12px] text-label-common_5 font-semibold">{product.price}</span>
+                  )}
+                  {product.volume && (
+                    <>
+                      <span className="text-[10px] text-label-common_3">/</span>
+                      <span className="text-[10px] text-label-common_3">{product.volume}</span>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-          </a>
+            </a>
+            ))}
+          </div>
         ))}
       </div>
 
+      {/* 프로그레스 바 (스크롤 네비게이션) */}
+      <div className="flex justify-center pt-[24px] pb-[16px]">
+        <div className="h-[4px] w-[32px] rounded-[4px] bg-container-common_2">
+          <div className="relative h-[4px] w-[32px]">
+            <div
+              className="absolute h-[4px] w-[15px] rounded-[4px] bg-label-common_5 transition-all duration-300"
+              style={{
+                left: currentPage === 0 ? '0px' : '17px'
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
       {/* 전체보기 버튼 */}
-      <div className="mt-[16px]">
+      <div className="mt-[8px]">
         <button
-          className="inline-flex justify-center items-center appearance-none px-[16px] h-[44px] rounded-[8px] text-[14px] font-medium border border-outline-common_2 bg-white hover:bg-container-common_2 active:bg-container-common_2 text-label-common_5 w-full transition-colors duration-200"
+          className="inline-flex justify-center items-center appearance-none px-[16px] h-[44px] rounded-[8px] text-[14px] font-semibold border border-outline-common_2 bg-white hover:bg-container-common_2 active:bg-container-common_2 text-label-common_5 w-full transition-colors duration-200"
           onClick={() => window.location.href = '/ranking'}
         >
-          더 많은 제품보기
+          See More
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" className="ml-[8px]">
             <path d="M9 18L15 12L9 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
